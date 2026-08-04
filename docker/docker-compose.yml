@@ -6,11 +6,11 @@ services:
     container_name: interview_postgres_dev
     restart: always
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=interviewdb
     ports:
-      - "5432:5432" 
+      - "5433:5432" 
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
 
