@@ -5,3 +5,5 @@ psycopg[binary]
 python-multipart==0.0.9
 faster-whisper==1.0.3
 requests
+qdrant-client>=1.7.0
+sentence-transformers>=2.3.0

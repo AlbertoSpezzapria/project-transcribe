@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 from models import Interview
 from transcriber import transcribe_audio
+from vector_db import add_transcription_to_qdrant  
 
 Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = "uploads"
@@ -34,21 +35,33 @@ async def upload_and_transcribe(file: UploadFile = File(...), db: Session = Depe
     db.refresh(new_interview)
 
     try:
-        # 3. Esegue la trascrizione AI
-        transcript_text = transcribe_audio(file_path)
+        # 3. Esegue la trascrizione AI (ci aspettiamo che restituisca i segmenti o che gestiamo l'estrazione)
+        # Nota: Se transcribe_audio restituisce una stringa unica, adatteremo il transcriber per restituire i segmenti.
+        segments_list, transcript_text = transcribe_audio(file_path)
         
-        # 4. Aggiorna il record con il testo e lo stato completato
+        # 4. Aggiorna il record nel DB relazionale con il testo e lo stato completato
         new_interview.transcript = transcript_text
         new_interview.status = "completed"
         db.commit()
+
+        # 5. Indicizzazione vettoriale su Qdrant
+        try:
+            add_transcription_to_qdrant(
+                interview_id=new_interview.id,
+                filename=file.filename,
+                segments=segments_list
+            )
+        except Exception as qdrant_err:
+            print(f"Attenzione: Errore durante l'indicizzazione su Qdrant: {qdrant_err}")
+
     except Exception as e:
         new_interview.status = "failed"
         db.commit()
         raise HTTPException(status_code=500, detail=f"Errore durante la trascrizione AI: {str(e)}")
 
     return {
-        "message": "Intervista caricata e trascritta con successo",
+        "message": "Intervista caricata, trascritta e indicizzata con successo",
         "interview_id": new_interview.id,
         "status": new_interview.status,
-        "transcript_preview": transcript_text[:300] + "..." # Mostra un'anteprima
+        "transcript_preview": transcript_text[:300] + "..."
     }
