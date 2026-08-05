@@ -10,9 +10,25 @@ services:
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=interviewdb
     ports:
-      - "5433:5432" 
+      - "5433:5432"
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
+
+  api:
+    build: 
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: interview_api_dev
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+    environment:
+      - DATABASE_URL=postgresql+psycopg://myuser:mypassword@db:5432/interviewdb
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - db
 
 volumes:
   postgres_data_dev:
