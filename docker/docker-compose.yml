@@ -36,6 +36,8 @@ services:
       - DATABASE_URL=postgresql+psycopg://myuser:mypassword@db:5432/interviewdb
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - DEFAULT_LLM_MODEL=openai/gpt-4o-mini
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - db

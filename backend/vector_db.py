@@ -31,34 +31,34 @@ def add_transcription_to_qdrant(interview_id: int, filename: str, segments: list
     """
     Riceve i segmenti della trascrizione da Whisper, li vettorializza
     e li salva su Qdrant con i relativi metadati.
-    """
-    init_vector_db()
-    
+    """    
     points = []
-    for idx, segment in enumerate(segments):
-        text = segment.text.strip()
-        if not text:
+    for idx, seg in enumerate(segments):
+        # 1. Recupero dinamico del testo (compatibile sia con grezzo che polished)
+        if isinstance(seg, dict):
+            text = seg.get("polished_text") or seg.get("text", "")
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+        else:
+            text = getattr(seg, "polished_text", getattr(seg, "text", ""))
+            start = getattr(seg, "start", 0.0)
+            end = getattr(seg, "end", 0.0)
+
+        if not text.strip():
             continue
-            
-        # Genera il vettore del chunk di testo
+
+        # 2. Generazione dell'embedding
         vector = embedding_model.encode(text).tolist()
-        
-        # ID univoco per il punto nel DB vettoriale (può essere un UUID o un intero combinato)
-        point_id = int(f"{interview_id}{idx:04d}")
-        
-        points.append(
-            models.PointStruct(
-                id=point_id,
-                vector=vector,
-                payload={
-                    "interview_id": interview_id,
-                    "filename": filename,
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": text
-                }
-            )
-        )
+
+        # 3. Creazione del punto Qdrant
+        payload = {
+            "interview_id": interview_id,
+            "filename": filename,
+            "segment_index": idx,
+            "start": start,
+            "end": end,
+            "text": text
+        }
     
     # Carica i punti in batch su Qdrant
     if points:
@@ -66,3 +66,31 @@ def add_transcription_to_qdrant(interview_id: int, filename: str, segments: list
             collection_name=COLLECTION_NAME,
             points=points
         )
+
+def search_transcriptions(query: str, limit: int = 5):
+    """
+    Esegue una ricerca semantica su Qdrant usando la query di testo.
+    """
+    # 1. Vettorializza la query dell'utente
+    query_vector = embedding_model.encode(query).tolist()
+    
+    # 2. Cerca i punti più vicini in Qdrant usando query_points (compatibile con le nuove versioni del client)
+    search_result = qdrant_client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        limit=limit
+    ).points  # Estraiamo la lista dei punti dal risultato
+    
+    # 3. Formatta i risultati estraendo il payload e lo score di similarità
+    results = []
+    for hit in search_result:
+        results.append({
+            "score": hit.score,  # Più è vicino a 1.0, più è semanticamente rilevante
+            "interview_id": hit.payload.get("interview_id"),
+            "filename": hit.payload.get("filename"),
+            "start": hit.payload.get("start"),
+            "end": hit.payload.get("end"),
+            "text": hit.payload.get("text")
+        })
+        
+    return results
