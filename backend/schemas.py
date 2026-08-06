@@ -40,3 +40,19 @@ class InterviewDetailResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ChatRequest(BaseModel):
+    question: str = Field(..., description="La domanda dell'utente sulle interviste")
+    interview_id: Optional[int] = Field(None, description="ID specifico per interrogare una sola intervista. Se null, cerca su tutto l'archivio.")
+    limit: int = Field(default=5, ge=1, le=15, description="Numero massimo di chunk di contesto da recuperare")
+
+class SourceSegment(BaseModel):
+    interview_id: int
+    filename: str
+    start: float
+    end: float
+    text: str
+
+class ChatResponse(BaseModel):
+    answer: str = Field(..., description="La risposta dettagliata elaborata dall'LLM")
+    sources: List[SourceSegment] = Field(..., description="I segmenti esatti usati come fonte con i timestamp per la citazione")

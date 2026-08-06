@@ -9,7 +9,8 @@ from transcriber import transcribe_audio
 from vector_db import add_transcription_to_qdrant, search_transcriptions
 from services.polisher import polish_transcription
 from typing import List
-from schemas import InterviewSummaryResponse, InterviewDetailResponse
+from schemas import InterviewSummaryResponse, InterviewDetailResponse, ChatRequest, ChatResponse, SourceSegment
+from services.rag import generate_rag_response
 
 Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = "uploads"
@@ -198,3 +199,60 @@ async def delete_interview(
     db.commit()
 
     return {"message": f"Intervista {interview_id} eliminata con successo"}
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_with_transcriptions(
+    chat_req: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Interroga il database vettoriale Qdrant recuperando i chunk pertinenti
+    e sintetizza una risposta motivata via LLM con citazioni precise dei timestamp.
+    """
+    # 1. Recupera i segmenti più rilevanti da Qdrant
+    try:
+        retrieved_chunks = search_transcriptions(
+            query=chat_req.question,
+            limit=chat_req.limit,
+            interview_id=chat_req.interview_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Errore durante il recupero dei contesti vettoriali: {str(e)}"
+        )
+
+    if not retrieved_chunks:
+        return ChatResponse(
+            answer="Non ho trovato alcun segmento pertinente nell'archivio per rispondere alla tua domanda.",
+            sources=[]
+        )
+
+    # 2. Genera la risposta dell'LLM tramite RAG
+    try:
+        answer_text = generate_rag_response(
+            question=chat_req.question,
+            context_chunks=retrieved_chunks
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Errore durante la generazione della risposta AI: {str(e)}"
+        )
+
+    # 3. Formatta le fonti per la risposta JSON del client
+    sources = [
+        SourceSegment(
+            interview_id=chunk["interview_id"],
+            filename=chunk["filename"],
+            start=chunk["start"],
+            end=chunk["end"],
+            text=chunk["text"]
+        )
+        for chunk in retrieved_chunks
+    ]
+
+    return ChatResponse(
+        answer=answer_text,
+        sources=sources
+    )
