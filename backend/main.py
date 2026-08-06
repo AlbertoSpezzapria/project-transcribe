@@ -8,6 +8,8 @@ from models import Interview
 from transcriber import transcribe_audio
 from vector_db import add_transcription_to_qdrant, search_transcriptions
 from services.polisher import polish_transcription
+from typing import List
+from schemas import InterviewSummaryResponse, InterviewDetailResponse
 
 Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = "uploads"
@@ -131,3 +133,68 @@ async def semantic_search(q: str, limit: int = 5):
         "results_count": len(results),
         "results": results
     }
+
+# --- GET /interviews (Elenco Completo) ---
+@app.get("/interviews", response_model=List[InterviewSummaryResponse])
+async def get_all_interviews(
+    skip: int = 0, 
+    limit: int = 50, 
+    db: Session = Depends(get_db)
+):
+    """
+    Restituisce la lista di tutte le interviste caricate nel sistema,
+    ordinate per ID decrescente (dalla più recente).
+    """
+    interviews = (
+        db.query(Interview)
+        .order_by(Interview.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return interviews
+
+# --- GET /interviews/{interview_id} (Dettaglio Singola Intervista) ---
+@app.get("/interviews/{interview_id}", response_model=InterviewDetailResponse)
+async def get_interview_by_id(
+    interview_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    Restituisce tutti i dettagli di una singola intervista,
+    inclusi la trascrizione grezza, la trascrizione raffinata e i segmenti.
+    """
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    
+    if not interview:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Intervista con ID {interview_id} non trovata"
+        )
+        
+    return interview
+
+@app.delete("/interviews/{interview_id}")
+async def delete_interview(
+    interview_id: int, 
+    db: Session = Depends(get_db)
+):
+    """
+    Elimina un'intervista da Postgres e dal filesystem.
+    """
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Intervista non trovata")
+
+    # Rimuovi il file audio da disco se presente
+    if interview.file_path and os.path.exists(interview.file_path):
+        try:
+            os.remove(interview.file_path)
+        except Exception as e:
+            print(f"Errore durante la rimozione del file {interview.file_path}: {e}")
+
+    # Rimuovi la voce dal DB
+    db.delete(interview)
+    db.commit()
+
+    return {"message": f"Intervista {interview_id} eliminata con successo"}
