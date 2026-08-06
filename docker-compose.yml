@@ -1,0 +1,66 @@
+services:
+  db:
+    image: postgres:15
+    container_name: interview_postgres_dev
+    restart: always
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=interviewdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: interview_qdrant_dev
+    restart: always
+    ports:
+      - "6333:6333"   
+      - "6334:6334"
+    volumes:
+      - qdrant_storage_dev:/qdrant/storage
+
+  api:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: interview_api_dev
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql+psycopg://myuser:mypassword@db:5432/interviewdb
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - DEFAULT_LLM_MODEL=openai/gpt-4o-mini
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - db
+      - qdrant
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: interview_frontend_dev
+    ports:
+      - "3000:3000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+
+volumes:
+  postgres_data_dev:
+  qdrant_storage_dev:

@@ -18,6 +18,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(title="Interview AI Platform")
 
+@app.get("/")
+async def root():
+    """Endpoint di health check per verificare che il server sia attivo."""
+    return {
+        "status": "online",
+        "service": "Interview AI Platform API",
+        "docs_url": "/docs"
+    }
+
 @app.post("/upload")
 async def upload_and_transcribe(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.filename.endswith(('.m4a', '.mp3', '.wav', '.mp4', '.mpeg')):
