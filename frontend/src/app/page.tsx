@@ -14,8 +14,8 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  const fetchInterviews = useCallback(async () => {
-    setLoading(true);
+  const fetchInterviews = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/interviews`, { cache: "no-store" });
@@ -25,15 +25,27 @@ export default function Dashboard() {
       const data: InterviewSummary[] = await res.json();
       setInterviews(data);
     } catch (err: any) {
-      setError(err.message || "Errore nella connessione con FastAPI.");
+      if (!isSilent) setError(err.message || "Errore nella connessione con FastAPI.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchInterviews();
   }, [fetchInterviews]);
+
+  // Polling automatico in sottofondo se ci sono interviste in stato "processing"
+  useEffect(() => {
+    const hasProcessing = interviews.some((item) => item.status === "processing");
+    if (!hasProcessing) return;
+
+    const interval = setInterval(() => {
+      fetchInterviews(true);
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [interviews, fetchInterviews]);
 
   const handleDelete = async (id: number) => {
     if (!confirm(`Sei sicuro di voler eliminare l'intervista #${id}?`)) return;

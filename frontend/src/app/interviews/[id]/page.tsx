@@ -37,9 +37,9 @@ export default function InterviewDetailPage() {
   const [seekTime, setSeekTime] = useState<number | null>(initialTime);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
 
-  const fetchInterviewDetail = useCallback(async () => {
+  const fetchInterviewDetail = useCallback(async (isSilent = false) => {
     if (!id) return;
-    setLoading(true);
+    if (!isSilent) setLoading(true);
     setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/interviews/${id}`, { cache: "no-store" });
@@ -54,15 +54,26 @@ export default function InterviewDetailPage() {
         setTranscriptTab("raw");
       }
     } catch (err: any) {
-      setError(err.message || "Errore nel caricamento dei dettagli.");
+      if (!isSilent) setError(err.message || "Errore nel caricamento dei dettagli.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
     fetchInterviewDetail();
   }, [fetchInterviewDetail]);
+
+  // Polling automatico se l'intervista aperta è in stato "processing"
+  useEffect(() => {
+    if (!interview || interview.status !== "processing") return;
+
+    const interval = setInterval(() => {
+      fetchInterviewDetail(true);
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [interview, fetchInterviewDetail]);
 
   const handleTimeUpdate = (currentTime: number) => {
     // Sincronizza il segmento attivo in base all'avanzamento dell'audio

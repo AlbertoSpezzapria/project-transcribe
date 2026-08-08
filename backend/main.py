@@ -1,24 +1,103 @@
 import os
 import shutil
 import re
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from database import engine, Base, get_db
+from database import engine, Base, get_db, SessionLocal
 from models import Interview
 from transcriber import transcribe_audio
-from vector_db import add_transcription_to_qdrant, search_transcriptions
+from vector_db import add_transcription_to_qdrant, search_transcriptions, init_vector_db
 from services.polisher import polish_transcription
 from typing import List
 from schemas import InterviewSummaryResponse, InterviewDetailResponse, ChatRequest, ChatResponse, SourceSegment
 from services.rag import generate_rag_response
+from contextlib import asynccontextmanager
 
 Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI(title="Interview AI Platform")
+def process_interview_background(interview_id: int, file_path: str, filename: str):
+    """Esegue la trascrizione Whisper, il Polishing LLM e l'indicizzazione Qdrant in sottofondo."""
+    db: Session = SessionLocal()
+    try:
+        interview = db.query(Interview).filter(Interview.id == interview_id).first()
+        if not interview:
+            return
+
+        # 1. Trascrizione Whisper AI
+        segments_list, raw_transcript_text = transcribe_audio(file_path)
+        
+        raw_segments_data = [
+            {"start": seg.start, "end": seg.end, "text": seg.text}
+            for seg in segments_list
+        ]
+
+        interview.raw_transcript = raw_transcript_text
+        interview.raw_segments = raw_segments_data
+        db.commit()
+
+        # 2. Polishing AI tramite LLM
+        segments_for_qdrant = raw_segments_data
+
+        try:
+            polished_data = polish_transcription(raw_segments_data)
+            full_polished_text = "\n\n".join([seg.polished_text for seg in polished_data.segments if seg.polished_text])
+
+            interview.polished_transcript = full_polished_text
+            interview.polished_segments = [seg.model_dump() for seg in polished_data.segments]
+            interview.summary = polished_data.summary
+            interview.key_topics = polished_data.key_topics
+            interview.status = "completed"
+            db.commit()
+
+            if polished_data.segments:
+                segments_for_qdrant = [
+                    {
+                        "start": seg.start, 
+                        "end": seg.end, 
+                        "text": seg.polished_text if seg.polished_text else seg.text
+                    }
+                    for seg in polished_data.segments
+                ]
+
+        except Exception as polish_err:
+            print(f"Attenzione: Errore durante il Polishing AI per intervista #{interview_id}: {polish_err}")
+            interview.status = "completed_raw_only"
+            db.commit()
+
+        # 3. Indicizzazione vettoriale su Qdrant
+        print(f"📊 [QDRANT] Inizio indicizzazione per Intervista ID {interview.id} con {len(segments_for_qdrant)} segmenti...")
+        try:
+            add_transcription_to_qdrant(
+                interview_id=interview.id,
+                filename=filename,
+                segments=segments_for_qdrant
+            )
+            print(f"✅ [QDRANT] Indicizzazione completata con successo per Intervista ID {interview.id}!")
+        except Exception as qdrant_err:
+            print(f"❌ [QDRANT] Errore durante l'indicizzazione: {qdrant_err}")
+
+    except Exception as e:
+        print(f"❌ Errore durante l'elaborazione dell'intervista #{interview_id}: {e}")
+        try:
+            interview = db.query(Interview).filter(Interview.id == interview_id).first()
+            if interview:
+                interview.status = "failed"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_vector_db()
+    yield
+
+app = FastAPI(title="Interview AI Platform", lifespan=lifespan)
 
 origins = [
     "http://localhost:3000",
@@ -45,7 +124,11 @@ async def root():
     }
 
 @app.post("/upload")
-async def upload_and_transcribe(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_and_transcribe(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db)
+):
     if not file.filename.endswith(('.m4a', '.mp3', '.wav', '.mp4', '.mpeg')):
         raise HTTPException(status_code=400, detail="Formato audio non supportato")
 
@@ -58,11 +141,11 @@ async def upload_and_transcribe(file: UploadFile = File(...), db: Session = Depe
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     finally:
-        await file.close()  # Chiude in modo sicuro lo stream di UploadFile di FastAPI
+        await file.close()
 
-    # 3. Crea il record nel DB con il nome sicuro e lo stato "processing"
+    # 3. Crea il record nel DB con lo stato "processing"
     new_interview = Interview(
-        filename=file.filename, # Manteniamo il nome originale per la UI
+        filename=file.filename,
         file_path=file_path,
         status="processing"
     )
@@ -70,75 +153,20 @@ async def upload_and_transcribe(file: UploadFile = File(...), db: Session = Depe
     db.commit()
     db.refresh(new_interview)
 
-    try:
-        # 4. Esegue la trascrizione AI con Whisper sul file_path sanitizzato
-        segments_list, raw_transcript_text = transcribe_audio(file_path)
-        
-        # Prepara la struttura dati dei segmenti grezzi per la chiamata al polisher e per Postgres
-        raw_segments_data = [
-            {"start": seg.start, "end": seg.end, "text": seg.text}
-            for seg in segments_list
-        ]
+    # 4. Avvia l'elaborazione pesante in sottofondo in modo asincrono
+    background_tasks.add_task(
+        process_interview_background,
+        interview_id=new_interview.id,
+        file_path=file_path,
+        filename=file.filename
+    )
 
-        # Salva la versione grezza (Verbatim) su Postgres
-        new_interview.raw_transcript = raw_transcript_text
-        new_interview.raw_segments = raw_segments_data
-        db.commit()
-
-        # 5. POLISHING AI: Trasforma il testo grezzo in versione editoriale tramite LLM
-        # Fallback di default: usiamo i segmenti grezzi per Qdrant
-        segments_for_qdrant = raw_segments_data
-
-        try:
-            # Invoca il polisher che restituisce l'oggetto Pydantic
-            polished_data = polish_transcription(raw_segments_data)
-            
-            # Assembla la trascrizione pulita completa concatenando i segmenti
-            full_polished_text = "\n\n".join([seg.polished_text for seg in polished_data.segments if seg.polished_text])
-
-            # Popola i nuovi campi AI ed editoriali su Postgres
-            new_interview.polished_transcript = full_polished_text
-            new_interview.polished_segments = [seg.model_dump() for seg in polished_data.segments]
-            new_interview.summary = polished_data.summary
-            new_interview.key_topics = polished_data.key_topics
-            new_interview.status = "completed"
-            db.commit()
-
-            # Passa i segmenti puliti a Qdrant
-            if polished_data.segments:
-                segments_for_qdrant = [
-                    {"start": seg.start, "end": seg.end, "text": seg.polished_text}
-                    for seg in polished_data.segments
-                ]
-
-        except Exception as polish_err:
-            print(f"Attenzione: Errore durante il Polishing AI: {polish_err}")
-            new_interview.status = "completed_raw_only"
-            db.commit()
-
-        # 6. Indicizzazione vettoriale su Qdrant
-        try:
-            add_transcription_to_qdrant(
-                interview_id=new_interview.id,
-                filename=file.filename,
-                segments=segments_for_qdrant
-            )
-        except Exception as qdrant_err:
-            print(f"Attenzione: Errore durante l'indicizzazione su Qdrant: {qdrant_err}")
-
-    except Exception as e:
-        new_interview.status = "failed"
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Errore durante la trascrizione AI: {str(e)}")
-
+    # 5. Rispondi immediatamente all'utente (< 1 sec)
     return {
-        "message": "Intervista caricata, trascritta, raffinata e indicizzata con successo",
+        "message": "Intervista caricata con successo. Elaborazione avviata in background.",
         "interview_id": new_interview.id,
         "status": new_interview.status,
-        "summary": getattr(new_interview, "summary", None),
-        "key_topics": getattr(new_interview, "key_topics", None),
-        "raw_preview": raw_transcript_text[:200] + "...",
-        "polished_preview": (new_interview.polished_transcript[:200] + "...") if new_interview.polished_transcript else None
+        "filename": new_interview.filename
     }
 
 @app.get("/search")
