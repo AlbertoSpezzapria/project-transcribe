@@ -2,13 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 2, 6, 23;
-  --background-end-rgb: 15, 23, 42;
+@layer base {
+  :root {
+    --color-bg-base: #020617;
+  }
+  
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
 }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: bg-slate-950;
+/* Scrollbar Personalizzata */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Classi utility Glassmorphism & Gradienti */
+.glass-panel {
+  @apply bg-slate-900/70 backdrop-blur-md border border-slate-800/60 shadow-xl;
+}
+
+.glass-panel-interactive {
+  @apply bg-slate-900/60 backdrop-blur-md border border-slate-800/60 transition-all duration-300 hover:border-indigo-500/40 hover:bg-slate-900/80 hover:shadow-indigo-500/10 shadow-lg;
+}
+
+.gradient-text {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400;
 }

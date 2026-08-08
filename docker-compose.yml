@@ -54,6 +54,7 @@ services:
       - HOST=0.0.0.0
       - PORT=3000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
