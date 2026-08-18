@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Sparkles, LayoutDashboard, MessageSquareText, Activity, Radio } from "lucide-react";
+import { Sparkles, LayoutDashboard, MessageSquareText, Activity, Radio, PenTool } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
 export default function Navbar() {
@@ -35,6 +35,12 @@ export default function Navbar() {
       label: "Dashboard",
       icon: LayoutDashboard,
       active: pathname === "/",
+    },
+    {
+      href: "/workspace",
+      label: "Workspace Editor",
+      icon: PenTool,
+      active: pathname.startsWith("/workspace"),
     },
     {
       href: "/chat",
@@ -77,14 +83,14 @@ export default function Navbar() {
                 }`}
               >
                 <Icon className={`w-4 h-4 ${link.active ? "text-indigo-400" : "text-slate-400"}`} />
-                <span>{link.label}</span>
+                <span className="hidden sm:inline">{link.label}</span>
               </Link>
             );
           })}
         </nav>
 
         {/* API Backend Status Indicator */}
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs">
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs">
           <Radio className="w-3.5 h-3.5 text-slate-400" />
           <span className="text-slate-400 font-medium">Backend:</span>
           {apiStatus === "online" && (

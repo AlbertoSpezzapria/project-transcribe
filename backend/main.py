@@ -10,14 +10,27 @@ from models import Interview
 from transcriber import transcribe_audio
 from vector_db import add_transcription_to_qdrant, search_transcriptions, init_vector_db
 from services.polisher import polish_transcription
-from typing import List
+from typing import List, Optional
 from schemas import InterviewSummaryResponse, InterviewDetailResponse, ChatRequest, ChatResponse, SourceSegment
 from services.rag import generate_rag_response
 from contextlib import asynccontextmanager
+from pydantic import BaseModel
+from services.drafter import generate_editorial_draft
+from models import Draft
 
 Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+class DraftRequest(BaseModel):
+    interview_ids: List[int]
+    format_type: str  # "article", "newsletter", "linkedin", "qa"
+    additional_instructions: Optional[str] = ""
+
+class SaveDraftRequest(BaseModel):
+    title: str
+    content: str
+    format_type: str
 
 def process_interview_background(interview_id: int, file_path: str, filename: str):
     """Esegue la trascrizione Whisper, il Polishing LLM e l'indicizzazione Qdrant in sottofondo."""
@@ -310,3 +323,67 @@ async def chat_with_transcriptions(
         answer=answer_text,
         sources=sources
     )
+
+
+@app.post("/draft/generate")
+async def generate_draft(request: DraftRequest, db: Session = Depends(get_db)):
+    if not request.interview_ids:
+        raise HTTPException(status_code=400, detail="Seleziona almeno un'intervista.")
+
+    interviews = db.query(Interview).filter(Interview.id.in_(request.interview_ids)).all()
+    if not interviews:
+        raise HTTPException(status_code=404, detail="Interviste non trovate.")
+
+    # Assembla il contesto
+    context_text = ""
+    for idx, interview in enumerate(interviews):
+        context_text += f"\n\n--- INTERVISTA {idx + 1}: {interview.filename} ---\n"
+        context_text += interview.summary or "Nessun riassunto disponibile. Testo:\n" + (interview.polished_transcript[:3000] if interview.polished_transcript else "")
+
+    # Mappatura dei prompt in base al formato richiesto
+    format_prompts = {
+        "article": "Scrivi un articolo giornalistico di approfondimento in terza persona (titolo, sottotitolo, paragrafi). Usa citazioni dirette se pertinenti.",
+        "newsletter": "Scrivi una sintesi breve e accattivante per una newsletter, evidenziando 3 punti chiave (bullet points).",
+        "linkedin": "Scrivi un post per LinkedIn professionale, coinvolgente e strutturato con paragrafi brevi. Includi hashtag pertinenti alla fine.",
+        "qa": "Struttura il contenuto come un'intervista Botta & Risposta, mettendo le domande in grassetto e le risposte in chiaro."
+    }
+
+    base_prompt = format_prompts.get(request.format_type, format_prompts["article"])
+    
+    system_prompt = (
+        "Sei un caporedattore esperto e un copywriter brillante. "
+        "Il tuo compito è scrivere una bozza partendo dalle fonti fornite."
+    )
+    
+    user_prompt = f"""
+    FORMATO RICHIESTO: {base_prompt}
+    ISTRUZIONI AGGIUNTIVE: {request.additional_instructions}
+    
+    Ecco le fonti a tua disposizione:
+    {context_text}
+    
+    Scrivi ora la bozza completa:
+    """
+
+    try:
+        # Usa la nuova funzione dedicata per la generazione della bozza
+        draft_content = generate_editorial_draft(system_prompt, user_prompt)
+        return {"draft": draft_content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore nella generazione: {str(e)}")
+
+@app.post("/drafts")
+async def save_draft(draft: SaveDraftRequest, db: Session = Depends(get_db)):
+    try:
+        new_draft = Draft(
+            title=draft.title,
+            content=draft.content,
+            format_type=draft.format_type
+        )
+        db.add(new_draft)
+        db.commit()
+        db.refresh(new_draft)
+        return {"message": "Bozza salvata con successo", "id": new_draft.id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Errore nel salvataggio: {str(e)}")
