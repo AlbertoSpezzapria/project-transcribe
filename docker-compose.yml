@@ -1,67 +1,97 @@
+# Ambiente di sviluppo. Tutte le porte sono legate a 127.0.0.1: nulla è esposto in rete.
+name: redazione
+
+x-api-env: &api-env
+  ENV: ${ENV:-development}
+  DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-redazione_app}:${APP_DB_PASSWORD:-app}@db:5432/${POSTGRES_DB:-redazione}
+  MIGRATIONS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-redazione}:${POSTGRES_PASSWORD:-owner}@db:5432/${POSTGRES_DB:-redazione}
+  APP_DB_USER: ${APP_DB_USER:-redazione_app}
+  SECRET_KEY: ${SECRET_KEY:?Imposta SECRET_KEY in .env (vedi .env.example)}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:5173"]}
+  S3_ENDPOINT_URL: http://storage:8333
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-redazione}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-redazione-secret}
+  S3_BUCKET: ${S3_BUCKET:-redazione-sources}
+  DEV_USER_EMAIL: ${DEV_USER_EMAIL:-}
+  DEV_USER_PASSWORD: ${DEV_USER_PASSWORD:-}
+
 services:
   db:
-    image: postgres:15
-    container_name: interview_postgres_dev
-    restart: always
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=myuser
-      - POSTGRES_PASSWORD=mypassword
-      - POSTGRES_DB=interviewdb
+      POSTGRES_USER: ${POSTGRES_USER:-redazione}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-owner}
+      POSTGRES_DB: ${POSTGRES_DB:-redazione}
+      APP_DB_USER: ${APP_DB_USER:-redazione_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5442:5432"
     volumes:
-      - postgres_data_dev:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: interview_qdrant_dev
-    restart: always
-    ports:
-      - "6333:6333"   
-      - "6334:6334"
+  storage:
+    # SeaweedFS con API S3 (le immagini Docker di MinIO non sono più distribuite)
+    image: chrislusf/seaweedfs:4.50
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-redazione}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-redazione-secret}
     volumes:
-      - qdrant_storage_dev:/qdrant/storage
+      - storage_data:/data
+      - ./infra/seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1"]
+      interval: 5s
+      retries: 20
 
   api:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: interview_api_dev
-    restart: always
+    build: ./apps/api
+    restart: unless-stopped
+    environment: *api-env
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8010:8000"
     volumes:
-      - ./backend:/app
-    environment:
-      - DATABASE_URL=postgresql+psycopg://myuser:mypassword@db:5432/interviewdb
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - DEFAULT_LLM_MODEL=openai/gpt-4o-mini
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - ./apps/api:/app
     depends_on:
-      - db
-      - qdrant
+      db: { condition: service_healthy }
+      storage: { condition: service_healthy }
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: interview_frontend_dev
-    ports:
-      - "3000:3000"
-    environment:
-      - HOST=0.0.0.0
-      - PORT=3000
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - WATCHPACK_POLLING=true
+  worker:
+    build: ./apps/api
+    restart: unless-stopped
+    environment: *api-env
+    command: procrastinate --app=app.jobs.app worker
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      - ./apps/api:/app
+    depends_on:
+      api: { condition: service_started }
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
     depends_on:
       - api
 
 volumes:
-  postgres_data_dev:
-  qdrant_storage_dev:
+  db_data:
+  storage_data:
+  web_node_modules:
