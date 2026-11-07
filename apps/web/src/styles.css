@@ -97,3 +97,55 @@ body {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/* Interlocutori: sei colori distinguibili, adattati al tema */
+:root {
+  --spk-1: #1f4ed8;
+  --spk-2: #b5470b;
+  --spk-3: #0f7b5f;
+  --spk-4: #8a2fb8;
+  --spk-5: #a8326e;
+  --spk-6: #5b6b0f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --spk-1: #7ea2ff;
+    --spk-2: #f0965c;
+    --spk-3: #4fd1a6;
+    --spk-4: #c99bf0;
+    --spk-5: #f08cbc;
+    --spk-6: #c3d164;
+  }
+}
+:root[data-theme="dark"] {
+  --spk-1: #7ea2ff;
+  --spk-2: #f0965c;
+  --spk-3: #4fd1a6;
+  --spk-4: #c99bf0;
+  --spk-5: #f08cbc;
+  --spk-6: #c3d164;
+}
+
+/* Trascrizione: righe renderizzate solo quando visibili (trascrizioni di ore) */
+.seg-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+.seg-row.is-current {
+  background: var(--accent-soft);
+}
+.w {
+  border-radius: 3px;
+  cursor: pointer;
+}
+.w:hover {
+  background: var(--surface-2);
+}
+.w.low {
+  text-decoration: underline dotted var(--warning);
+  text-underline-offset: 3px;
+}
+.w.is-active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}

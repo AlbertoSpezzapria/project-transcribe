@@ -321,6 +321,185 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/sources/{source_id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Transcript */
+        get: operations["get_transcript_api_workspaces__workspace_id__sources__source_id__transcript_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/sources/{source_id}/transcripts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Versions */
+        get: operations["list_versions_api_workspaces__workspace_id__sources__source_id__transcripts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/sources/{source_id}/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe
+         * @description Nuova trascrizione. Le correzioni della versione attuale restano nella sua versione.
+         */
+        post: operations["transcribe_api_workspaces__workspace_id__sources__source_id__transcribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Version
+         * @description Torna a una versione precedente (pronta) della trascrizione.
+         */
+        post: operations["activate_version_api_workspaces__workspace_id__transcripts__transcript_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/segments/{segment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Segment */
+        patch: operations["update_segment_api_workspaces__workspace_id__segments__segment_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/speakers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Speaker */
+        post: operations["create_speaker_api_workspaces__workspace_id__transcripts__transcript_id__speakers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/speakers/{speaker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename Speaker */
+        patch: operations["rename_speaker_api_workspaces__workspace_id__speakers__speaker_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/speakers/{speaker_id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Speaker
+         * @description Unisce due interlocutori (la diarization a volte divide la stessa persona in due).
+         */
+        post: operations["merge_speaker_api_workspaces__workspace_id__speakers__speaker_id__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/clean": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Clean */
+        post: operations["request_clean_api_workspaces__workspace_id__transcripts__transcript_id__clean_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Transcript */
+        get: operations["export_transcript_api_workspaces__workspace_id__transcripts__transcript_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -397,12 +576,15 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * JobStatus
+         * @description Stato di un passo della pipeline (trascrizione, versione pulita).
+         * @enum {string}
+         */
+        JobStatus: "none" | "queued" | "processing" | "ready" | "failed";
         /** LoginRequest */
         LoginRequest: {
-            /**
-             * Email
-             * Format: email
-             */
+            /** Email */
             email: string;
             /** Password */
             password: string;
@@ -453,6 +635,50 @@ export interface components {
          * @enum {string}
          */
         Role: "owner" | "editor" | "journalist";
+        /** SegmentOut */
+        SegmentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Idx */
+            idx: number;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Speaker Id */
+            speaker_id: string | null;
+            /** Text Raw */
+            text_raw: string;
+            /** Text Edited */
+            text_edited: string | null;
+            /** Text Clean */
+            text_clean: string | null;
+            /**
+             * Words
+             * @description [parola, inizio, fine, probabilità]
+             */
+            words: [
+                string,
+                number,
+                number,
+                number
+            ][];
+            /** Edited At */
+            edited_at: string | null;
+        };
+        /** SegmentUpdate */
+        SegmentUpdate: {
+            /**
+             * Text
+             * @description Testo corretto; null torna al verbatim
+             */
+            text?: string | null;
+            /** Speaker Id */
+            speaker_id?: string | null;
+        };
         /** SourceOut */
         SourceOut: {
             /**
@@ -513,6 +739,36 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** SpeakerCreate */
+        SpeakerCreate: {
+            /** Name */
+            name: string;
+        };
+        /** SpeakerMerge */
+        SpeakerMerge: {
+            /**
+             * Into Id
+             * Format: uuid
+             */
+            into_id: string;
+        };
+        /** SpeakerOut */
+        SpeakerOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string | null;
+        };
+        /** SpeakerUpdate */
+        SpeakerUpdate: {
+            /** Name */
+            name?: string | null;
+        };
         /** StoryCreate */
         StoryCreate: {
             /** Title */
@@ -560,6 +816,103 @@ export interface components {
             /** Description */
             description?: string | null;
             status?: components["schemas"]["StoryStatus"] | null;
+        };
+        /** TranscribeRequest */
+        TranscribeRequest: {
+            /**
+             * Language
+             * @description Codice ISO 639-1; null = automatica
+             */
+            language?: string | null;
+        };
+        /** TranscriptOut */
+        TranscriptOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Current */
+            is_current: boolean;
+            status: components["schemas"]["JobStatus"];
+            /** Progress */
+            progress: number;
+            /** Error */
+            error: string | null;
+            /** Engine */
+            engine: string;
+            /** Model */
+            model: string;
+            /** Language */
+            language: string | null;
+            /** Detected Language */
+            detected_language: string | null;
+            /** Duration */
+            duration: number | null;
+            /** Diarized */
+            diarized: boolean;
+            clean_status: components["schemas"]["JobStatus"];
+            /** Clean Model */
+            clean_model: string | null;
+            /** Clean Error */
+            clean_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Peaks */
+            peaks: number[] | null;
+            /** Speakers */
+            speakers: components["schemas"]["SpeakerOut"][];
+            /** Segments */
+            segments: components["schemas"]["SegmentOut"][];
+            pending?: components["schemas"]["TranscriptSummary"] | null;
+            /** Clean Available */
+            clean_available: boolean;
+            /** Clean Unavailable Reason */
+            clean_unavailable_reason?: string | null;
+        };
+        /** TranscriptSummary */
+        TranscriptSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Current */
+            is_current: boolean;
+            status: components["schemas"]["JobStatus"];
+            /** Progress */
+            progress: number;
+            /** Error */
+            error: string | null;
+            /** Engine */
+            engine: string;
+            /** Model */
+            model: string;
+            /** Language */
+            language: string | null;
+            /** Detected Language */
+            detected_language: string | null;
+            /** Duration */
+            duration: number | null;
+            /** Diarized */
+            diarized: boolean;
+            clean_status: components["schemas"]["JobStatus"];
+            /** Clean Model */
+            clean_model: string | null;
+            /** Clean Error */
+            clean_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Completed At */
+            completed_at: string | null;
         };
         /** UserOut */
         UserOut: {
@@ -1285,6 +1638,347 @@ export interface operations {
             };
             path: {
                 asset_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_transcript_api_workspaces__workspace_id__sources__source_id__transcript_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_versions_api_workspaces__workspace_id__sources__source_id__transcripts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transcribe_api_workspaces__workspace_id__sources__source_id__transcribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscribeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_version_api_workspaces__workspace_id__transcripts__transcript_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transcript_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_segment_api_workspaces__workspace_id__segments__segment_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                segment_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_speaker_api_workspaces__workspace_id__transcripts__transcript_id__speakers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transcript_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeakerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeakerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_speaker_api_workspaces__workspace_id__speakers__speaker_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                speaker_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeakerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeakerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_speaker_api_workspaces__workspace_id__speakers__speaker_id__merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                speaker_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeakerMerge"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_clean_api_workspaces__workspace_id__transcripts__transcript_id__clean_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transcript_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_transcript_api_workspaces__workspace_id__transcripts__transcript_id__export_get: {
+        parameters: {
+            query?: {
+                format?: "txt" | "srt";
+                text?: "edited" | "clean";
+            };
+            header?: never;
+            path: {
+                transcript_id: string;
                 workspace_id: string;
             };
             cookie?: never;

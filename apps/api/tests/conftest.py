@@ -21,6 +21,10 @@ os.environ["DATABASE_URL"] = _swap_db(os.environ["DATABASE_URL"], TEST_DB)
 os.environ["MIGRATIONS_DATABASE_URL"] = _swap_db(os.environ["MIGRATIONS_DATABASE_URL"], TEST_DB)
 os.environ["S3_BUCKET"] = "redazione-test"
 os.environ["ENV"] = "test"
+os.environ["STT_ENGINE"] = "fake"
+os.environ["DIARIZATION_ENABLED"] = "false"
+for _k in ("LLM_CLOUD_API_KEY", "LLM_CLOUD_MODEL", "LLM_LOCAL_BASE_URL", "LLM_LOCAL_MODEL"):
+    os.environ.pop(_k, None)
 
 
 def _recreate_database() -> None:

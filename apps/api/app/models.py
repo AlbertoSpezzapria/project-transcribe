@@ -1,4 +1,4 @@
-"""Modello dati della Fase 1.
+"""Modello dati.
 
 Le tabelle con `workspace_id` sono protette da Row-Level Security (vedi migrazione 0001):
 anche un errore nell'API non può far leggere dati di un altro workspace.
@@ -14,13 +14,16 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -81,6 +84,16 @@ class SourceStatus(str, enum.Enum):
 class AssetKind(str, enum.Enum):
     original = "original"
     derived = "derived"
+
+
+class JobStatus(str, enum.Enum):
+    """Stato di un passo della pipeline (trascrizione, versione pulita)."""
+
+    none = "none"
+    queued = "queued"
+    processing = "processing"
+    ready = "ready"
+    failed = "failed"
 
 
 # --- Identità e accesso (senza RLS: servono prima di conoscere il workspace) ---
@@ -262,6 +275,115 @@ class Asset(Base):
     source: Mapped[Source] = relationship(back_populates="assets")
 
 
+class Transcript(Base):
+    """Una versione della trascrizione di una fonte audio/video.
+
+    Ritrascrivere crea una nuova versione: le correzioni fatte sulla precedente
+    non vengono mai sovrascritte. `is_current` indica quella mostrata.
+    """
+
+    __tablename__ = "transcripts"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_transcripts_ws_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "source_id"],
+            ["sources.workspace_id", "sources.id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_transcripts_source", "source_id"),
+        Index("uq_transcripts_current", "source_id", unique=True, postgresql_where=text("is_current")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    status: Mapped[JobStatus] = mapped_column(
+        _enum(JobStatus, "job_status"), default=JobStatus.queued, nullable=False
+    )
+    progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    error: Mapped[str | None] = mapped_column(String(500))
+    engine: Mapped[str] = mapped_column(String(50), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    language: Mapped[str | None] = mapped_column(String(10))  # richiesta (None = automatica)
+    detected_language: Mapped[str | None] = mapped_column(String(10))
+    duration: Mapped[float | None] = mapped_column(Float)
+    diarized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Forma d'onda ridotta (picchi normalizzati 0..1) per il player
+    peaks: Mapped[list | None] = mapped_column(JSONB)
+    clean_status: Mapped[JobStatus] = mapped_column(
+        _enum(JobStatus, "job_status"), default=JobStatus.none, nullable=False
+    )
+    clean_model: Mapped[str | None] = mapped_column(String(100))
+    clean_error: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _created_at()
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Speaker(Base):
+    """Interlocutore dentro una trascrizione (SPEAKER_00 → "Mario Rossi")."""
+
+    __tablename__ = "speakers"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_speakers_ws_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "transcript_id"],
+            ["transcripts.workspace_id", "transcripts.id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_speakers_transcript", "transcript_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    transcript_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    label: Mapped[str] = mapped_column(String(50), nullable=False)  # dato dalla diarization
+    name: Mapped[str | None] = mapped_column(String(200))  # dato dal giornalista
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Segment(Base):
+    """Unità citabile: un turno di parola con i tempi di ogni parola.
+
+    `text_raw` è il verbatim del modello e non cambia mai; `text_edited` contiene
+    le correzioni umane; `text_clean` è la versione leggibile, derivata e mai usata
+    per le citazioni.
+    """
+
+    __tablename__ = "segments"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_segments_ws_id"),
+        UniqueConstraint("transcript_id", "idx", name="uq_segments_transcript_idx"),
+        ForeignKeyConstraint(
+            ["workspace_id", "transcript_id"],
+            ["transcripts.workspace_id", "transcripts.id"],
+            ondelete="CASCADE",
+        ),
+        # Se lo speaker viene eliminato resta il segmento, senza speaker.
+        ForeignKeyConstraint(
+            ["workspace_id", "speaker_id"],
+            ["speakers.workspace_id", "speakers.id"],
+            ondelete="SET NULL (speaker_id)",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    transcript_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    start: Mapped[float] = mapped_column(Float, nullable=False)
+    end: Mapped[float] = mapped_column(Float, nullable=False)
+    speaker_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    text_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    text_edited: Mapped[str | None] = mapped_column(Text)
+    text_clean: Mapped[str | None] = mapped_column(Text)
+    # [{"w": "parola", "s": 1.23, "e": 1.57, "p": 0.98}, ...]
+    words: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    edited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AuditLog(Base):
     """Chi ha fatto cosa. Mai contenuti delle fonti, solo identificativi."""
 
@@ -281,4 +403,13 @@ class AuditLog(Base):
 
 
 # Tabelle protette da RLS: usato dalla migrazione e dai test.
-RLS_TABLES = ["stories", "sources", "story_sources", "assets", "audit_log"]
+RLS_TABLES = [
+    "stories",
+    "sources",
+    "story_sources",
+    "assets",
+    "transcripts",
+    "speakers",
+    "segments",
+    "audit_log",
+]

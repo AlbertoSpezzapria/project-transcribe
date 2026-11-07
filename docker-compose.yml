@@ -15,6 +15,17 @@ x-api-env: &api-env
   S3_BUCKET: ${S3_BUCKET:-redazione-sources}
   DEV_USER_EMAIL: ${DEV_USER_EMAIL:-}
   DEV_USER_PASSWORD: ${DEV_USER_PASSWORD:-}
+  STT_ENGINE: ${STT_ENGINE:-faster-whisper}
+  STT_MODEL: ${STT_MODEL:-small}
+  STT_DEFAULT_LANGUAGE: ${STT_DEFAULT_LANGUAGE:-it}
+  DIARIZATION_ENABLED: ${DIARIZATION_ENABLED:-false}
+  HF_TOKEN: ${HF_TOKEN:-}
+  LLM_CLOUD_BASE_URL: ${LLM_CLOUD_BASE_URL:-https://openrouter.ai/api/v1}
+  LLM_CLOUD_API_KEY: ${LLM_CLOUD_API_KEY:-}
+  LLM_CLOUD_MODEL: ${LLM_CLOUD_MODEL:-}
+  LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-}
+  LLM_LOCAL_API_KEY: ${LLM_LOCAL_API_KEY:-}
+  LLM_LOCAL_MODEL: ${LLM_LOCAL_MODEL:-}
 
 services:
   db:
@@ -53,7 +64,7 @@ services:
       retries: 20
 
   api:
-    build: ./apps/api
+    build: { context: ./apps/api, target: api }
     restart: unless-stopped
     environment: *api-env
     command: >
@@ -68,12 +79,28 @@ services:
       storage: { condition: service_healthy }
 
   worker:
-    build: ./apps/api
+    # Code leggere: controlli sui file e modello linguistico
+    build: { context: ./apps/api, target: api }
     restart: unless-stopped
     environment: *api-env
-    command: procrastinate --app=app.jobs.app worker
+    command: procrastinate --app=app.jobs.app worker --queues=ingest,llm
     volumes:
       - ./apps/api:/app
+    depends_on:
+      api: { condition: service_started }
+
+  worker-stt:
+    # Trascrizione e diarization, un file alla volta. In sviluppo gira su CPU.
+    build:
+      context: ./apps/api
+      target: stt
+      args:
+        WITH_DIARIZATION: ${WITH_DIARIZATION:-0}
+    restart: unless-stopped
+    environment: *api-env
+    volumes:
+      - ./apps/api:/app
+      - stt_models:/home/redazione/.cache
     depends_on:
       api: { condition: service_started }
 
@@ -95,3 +122,4 @@ volumes:
   db_data:
   storage_data:
   web_node_modules:
+  stt_models:

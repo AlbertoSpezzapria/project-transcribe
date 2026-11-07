@@ -5,6 +5,7 @@ import { Shell } from "@/components/Shell";
 import { authQuery, routeForStep } from "@/lib/auth";
 import { LoginPage, MfaSetupPage, MfaVerifyPage } from "@/routes/auth";
 import { ArchivePage, ComingSoon, StoriesPage, StoryPage } from "@/routes/pages";
+import { SourcePage } from "@/routes/source";
 
 type Ctx = { queryClient: QueryClient };
 
@@ -71,6 +72,7 @@ const wsIndex = createRoute({
 const stories = createRoute({ getParentRoute: () => workspace, path: "/storie", component: StoriesPage });
 const story = createRoute({ getParentRoute: () => workspace, path: "/storie/$storyId", component: StoryPage });
 const archive = createRoute({ getParentRoute: () => workspace, path: "/archivio", component: ArchivePage });
+const source = createRoute({ getParentRoute: () => workspace, path: "/fonti/$sourceId", component: SourcePage });
 const search = createRoute({
   getParentRoute: () => workspace,
   path: "/ricerca",
@@ -103,7 +105,7 @@ const routeTree = root.addChildren([
   login,
   mfaSetup,
   mfaVerify,
-  authed.addChildren([home, workspace.addChildren([wsIndex, stories, story, archive, search, people, graph])]),
+  authed.addChildren([home, workspace.addChildren([wsIndex, stories, story, archive, source, search, people, graph])]),
 ]);
 
 export function makeRouter(queryClient: QueryClient) {

@@ -2,12 +2,13 @@
 
 Archivio di lavoro per giornalisti: interviste, documenti e note organizzati per storia, ricercabili e citabili, con uno studio di produzione per carta, web e social. Il design completo è in [docs/DESIGN.md](docs/DESIGN.md).
 
-Stato: **Fase 0 e Fase 1 completate** (fondamenta). La trascrizione arriva con la Fase 2.
+Stato: **Fasi 0, 1 e 2 completate**: fondamenta, trascrizione con editor sincronizzato. Prossima: documenti, web e ricerca (Fase 3).
 
 ## Struttura
 
 ```
-apps/api      API FastAPI, modelli, migrazioni Alembic, worker della coda (Procrastinate)
+apps/api      API FastAPI, modelli, migrazioni Alembic, worker della coda (Procrastinate),
+              pipeline di trascrizione (app/pipeline)
 apps/web      Frontend React + TypeScript (Vite, TanStack Router/Query, Tailwind)
 infra/        Script di inizializzazione di Postgres e SeaweedFS
 docs/         Documenti di design
@@ -41,6 +42,22 @@ docker compose exec api python -m app.cli seed-dev
 ```
 
 4. Apri http://localhost:5173. Al primo accesso è obbligatorio configurare la verifica in due passaggi con un'app di autenticazione.
+
+### Trascrizione
+
+Il servizio `worker-stt` trascrive audio e video sul posto, senza inviare nulla all'esterno. In sviluppo gira su CPU con il modello `small` (`STT_MODEL` in `.env`); al primo uso scarica il modello nel volume `stt_models`. Sul server con GPU si usa `large-v3-turbo`.
+
+Riconoscimento degli interlocutori (facoltativo, pesante):
+
+1. crea un token su Hugging Face e accetta la licenza di `pyannote/speaker-diarization-community-1`;
+2. in `.env` imposta `WITH_DIARIZATION=1`, `DIARIZATION_ENABLED=true` e `HF_TOKEN`;
+3. ricostruisci il worker:
+
+```bash
+docker compose up -d --build worker-stt
+```
+
+Versione pulita della trascrizione: imposta `LLM_CLOUD_API_KEY` e `LLM_CLOUD_MODEL` (qualsiasi API compatibile OpenAI). Il profilo cloud vale solo per le fonti normali; per quelle riservate serve un modello locale (`LLM_LOCAL_*`).
 
 | Servizio | Indirizzo |
 |---|---|
@@ -87,3 +104,4 @@ docker compose exec api python -m app.cli --help
 - **File**: tipo riconosciuto dal contenuto e non dall'estensione, hash SHA-256 dell'originale, chiavi di storage senza nomi di file. Lo storage non è esposto: i file passano dall'API con controllo dei permessi e supporto Range per il player.
 - **Tracciabilità**: registro di audit in sola aggiunta (l'applicazione non può modificarlo né cancellarlo), senza contenuti delle fonti.
 - **Cancellazione**: eliminare una fonte rimuove anche i file dallo storage.
+- **Trascrizioni**: l'audio viene trascritto sul server; il verbatim del modello non viene mai sovrascritto (le correzioni sono separate) e la versione pulita non è usabile per le citazioni. Le fonti riservate non vengono mai inviate a un modello linguistico esterno.

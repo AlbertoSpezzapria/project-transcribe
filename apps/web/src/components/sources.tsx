@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   Download,
   FileAudio,
@@ -7,6 +8,7 @@ import {
   Globe,
   Lock,
   NotebookPen,
+  ScrollText,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -43,7 +45,7 @@ function StatusBadge({ source }: { source: Source }) {
   switch (source.status) {
     case "uploaded":
     case "processing":
-      return <Badge tone="accent">In elaborazione</Badge>;
+      return <Badge tone="accent">{source.status_detail?.startsWith("Trascrizione") ? source.status_detail : "In elaborazione"}</Badge>;
     case "failed":
       return <Badge tone="danger">Errore</Badge>;
     default:
@@ -124,9 +126,6 @@ function SourceRow({
           {original && source.type === "audio" && (
             <audio controls preload="metadata" className="w-full" src={assetUrl(workspaceId, original.id)} />
           )}
-          {original && source.type === "video" && (
-            <video controls preload="metadata" className="max-h-80 w-full rounded" src={assetUrl(workspaceId, original.id)} />
-          )}
           {source.note_text && <p className="whitespace-pre-wrap text-sm">{source.note_text}</p>}
           {original && (
             <p className="font-mono text-[11px] text-muted" title="Impronta SHA-256 dell'originale">
@@ -134,6 +133,13 @@ function SourceRow({
             </p>
           )}
           <div className="flex flex-wrap gap-2">
+            {(source.type === "audio" || source.type === "video") && (
+              <Link to="/w/$workspaceId/fonti/$sourceId" params={{ workspaceId, sourceId: source.id }}>
+                <Button size="sm">
+                  <ScrollText className="size-3.5" /> {source.status === "ready" ? "Apri la trascrizione" : "Apri"}
+                </Button>
+              </Link>
+            )}
             {original && (
               <a href={assetUrl(workspaceId, original.id, true)}>
                 <Button variant="secondary" size="sm">

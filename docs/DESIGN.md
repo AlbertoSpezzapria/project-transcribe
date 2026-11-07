@@ -450,3 +450,37 @@ In entrambi i casi il gateway LLM resta astratto, così il passaggio da un'opzio
 - Limite ai tentativi condiviso (Postgres/Redis) se l'API girerà su più istanze.
 - Job periodico che rimette in coda le fonti rimaste nello stato "uploaded".
 - Gestione dei membri del workspace dall'interfaccia (oggi da riga di comando).
+
+### Fase 2 — 7 novembre 2026
+**Fatto**
+- Modello dati: versioni della trascrizione (`transcripts`), interlocutori (`speakers`) e segmenti citabili (`segments`) con verbatim immutabile, correzione umana e versione pulita separati; parole con tempi e probabilità; RLS e FK composte come per le altre tabelle.
+- Pipeline: l'ingestione di audio e video mette in coda la trascrizione su una coda dedicata (`stt`), servita da un worker separato con ffmpeg (immagine `stt`, un file alla volta). Normalizzazione a WAV 16 kHz mono, forma d'onda ridotta per il player, trascrizione con tempi per parola, avanzamento visibile, errori leggibili.
+- Diarization con pyannote, opzionale: si attiva con l'immagine costruita con `WITH_DIARIZATION=1`, `DIARIZATION_ENABLED=true` e un token Hugging Face. Le parole vengono assegnate al turno con la sovrapposizione maggiore. Senza diarization ogni frase è un passaggio a sé, da assegnare a mano.
+- Versioni: ritrascrivere crea una nuova versione, che diventa corrente solo quando è pronta. Le correzioni restano nella versione su cui sono state fatte e si può tornare a una versione precedente.
+- Versione pulita (on demand): gateway LLM compatibile OpenAI con instradamento per riservatezza. Il cloud è ammesso solo per le fonti normali, mentre le riservate e le segrete vanno solo al modello locale. Ogni passaggio pulito passa un controllo automatico su cifre, nomi propri e lunghezza; se non lo supera resta il verbatim. Il prompt tratta il testo come dato.
+- Vista fonte audio/video:
+  - player con forma d'onda e fasce colorate per interlocutore, velocità e ±5 s;
+  - scorciatoie da tastiera;
+  - parola corrente evidenziata durante l'ascolto e clic su una parola per ascoltarla;
+  - parole incerte sottolineate;
+  - correzione dei passaggi con ripristino del verbatim;
+  - interlocutori: nome, assegnazione, nuovo, unione;
+  - selettore di versione;
+  - export TXT e SRT, tracciato nell'audit.
+- 31 test automatici: segmentazione, controlli della versione pulita, instradamento per riservatezza, flusso completo con motore finto, versioni, isolamento.
+
+**Scostamenti dal design**
+- **faster-whisper + pyannote invece di WhisperX**: stessa sostanza (Whisper su CTranslate2, tempi per parola, VAD, diarization pyannote) con meno dipendenze fragili. L'allineamento fonetico wav2vec2 di WhisperX si può aggiungere se i tempi delle parole risultano imprecisi sulle interviste vere.
+- **Versione pulita su richiesta**, non automatica: il giornalista decide quando mandare il testo al modello linguistico.
+- **Niente virtualizzazione della lista**: le righe usano `content-visibility: auto` e l'evidenziazione della parola agisce direttamente sul DOM. Va verificato su una trascrizione di 2–3 ore.
+
+**Verificato a mano**
+- Intervista sintetica di 77 secondi (voci di sintesi italiane), trascritta su CPU con il modello `small` in circa 30 secondi: numeri e nomi resi correttamente.
+- Le voci di sintesi più robotiche (es. "Reed" di macOS) non vengono riconosciute da Whisper: per le prove servono voci naturali o registrazioni vere.
+
+**Da fare più avanti**
+- Dividere e unire passaggi (oggi si correggono testo e interlocutore, non i confini).
+- Collaudo della diarization con un token Hugging Face e audio reale; prova su un'intervista di un'ora (tempi su CPU e su GPU).
+- Immagine `stt` con base CUDA per il server con GPU; modelli scaricati in anticipo e `HF_HUB_OFFLINE=1` in produzione.
+- Vocabolario personalizzato (nomi, sigle) passato al modello come contesto iniziale.
+- Modifiche concorrenti allo stesso passaggio: oggi vince l'ultima.

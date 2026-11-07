@@ -54,8 +54,11 @@ def test_upload_play_and_delete(client):
     assert "sindaco" not in key
 
     # Job di ingestione (eseguito qui in modo sincrono)
+    # Per l'audio, l'ingestione mette in coda la trascrizione
     jobs.ingest_source(workspace_id=str(ws), source_id=src["id"])
-    assert client.get(f"/api/workspaces/{ws}/sources/{src['id']}").json()["status"] == "ready"
+    after = client.get(f"/api/workspaces/{ws}/sources/{src['id']}").json()
+    assert after["status"] == "processing"
+    assert after["status_detail"] == "In coda per la trascrizione"
 
     # Riproduzione con Range, come fa il player audio
     url = f"/api/workspaces/{ws}/assets/{asset['id']}/content"

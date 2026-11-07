@@ -39,6 +39,28 @@ class Settings(BaseSettings):
 
     totp_issuer: str = "Redazione"
 
+    # Trascrizione (worker "stt"). Engine: faster-whisper | fake (solo test).
+    stt_engine: str = "faster-whisper"
+    # large-v3-turbo in produzione su GPU; "small" è un buon compromesso su CPU in sviluppo.
+    stt_model: str = "large-v3-turbo"
+    stt_device: str = "auto"  # auto | cpu | cuda
+    stt_compute_type: str = "default"  # default | int8 | float16 ...
+    stt_default_language: str | None = "it"  # None = riconoscimento automatico
+    # Diarization con pyannote: serve un token Hugging Face con la licenza del modello accettata.
+    diarization_enabled: bool = False
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
+    hf_token: str | None = None
+
+    # Gateway LLM (API compatibile OpenAI: OpenRouter, vLLM, Ollama...).
+    # Profilo "cloud": solo per le fonti normali. Profilo "local": per tutte, comprese le riservate.
+    llm_cloud_base_url: str = "https://openrouter.ai/api/v1"
+    llm_cloud_api_key: str | None = None
+    llm_cloud_model: str | None = None
+    llm_local_base_url: str | None = None
+    llm_local_api_key: str | None = None
+    llm_local_model: str | None = None
+    llm_timeout_seconds: float = 120.0
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"

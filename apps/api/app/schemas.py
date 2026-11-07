@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import Confidentiality, Role, SourceStatus, SourceType, StoryStatus
+from app.models import Confidentiality, JobStatus, Role, SourceStatus, SourceType, StoryStatus
 
 
 class ORM(BaseModel):
@@ -131,3 +131,79 @@ class SourceUpdate(BaseModel):
     source_date: date | None = None
     confidentiality: Confidentiality | None = None
     metadata: dict | None = None
+
+
+# --- Trascrizioni ----------------------------------------------------------------
+
+
+class SpeakerOut(ORM):
+    id: uuid.UUID
+    label: str
+    name: str | None
+
+
+class SegmentOut(ORM):
+    id: uuid.UUID
+    idx: int
+    start: float
+    end: float
+    speaker_id: uuid.UUID | None
+    text_raw: str
+    text_edited: str | None
+    text_clean: str | None
+    words: list[tuple[str, float, float, float]] = Field(description="[parola, inizio, fine, probabilità]")
+    edited_at: datetime | None
+
+
+class TranscriptSummary(ORM):
+    id: uuid.UUID
+    is_current: bool
+    status: JobStatus
+    progress: float
+    error: str | None
+    engine: str
+    model: str
+    language: str | None
+    detected_language: str | None
+    duration: float | None
+    diarized: bool
+    clean_status: JobStatus
+    clean_model: str | None
+    clean_error: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class TranscriptOut(TranscriptSummary):
+    peaks: list[float] | None
+    speakers: list[SpeakerOut]
+    segments: list[SegmentOut]
+    # Nuova versione in preparazione (diventa corrente quando è pronta)
+    pending: TranscriptSummary | None = None
+    clean_available: bool
+    clean_unavailable_reason: str | None = None
+
+
+class SegmentUpdate(BaseModel):
+    text: str | None = Field(
+        default=None, max_length=20_000, description="Testo corretto; null torna al verbatim"
+    )
+    speaker_id: uuid.UUID | None = None
+
+
+class SpeakerCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class SpeakerUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+
+
+class SpeakerMerge(BaseModel):
+    into_id: uuid.UUID
+
+
+class TranscribeRequest(BaseModel):
+    language: str | None = Field(
+        default=None, pattern=r"^[a-z]{2}$", description="Codice ISO 639-1; null = automatica"
+    )
