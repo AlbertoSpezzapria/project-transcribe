@@ -20,9 +20,12 @@ x-api-env: &api-env
   STT_DEFAULT_LANGUAGE: ${STT_DEFAULT_LANGUAGE:-it}
   DIARIZATION_ENABLED: ${DIARIZATION_ENABLED:-false}
   HF_TOKEN: ${HF_TOKEN:-}
+  EMBEDDER_URL: http://embedder:8001
   LLM_CLOUD_BASE_URL: ${LLM_CLOUD_BASE_URL:-https://openrouter.ai/api/v1}
   LLM_CLOUD_API_KEY: ${LLM_CLOUD_API_KEY:-}
   LLM_CLOUD_MODEL: ${LLM_CLOUD_MODEL:-}
+  LLM_CLOUD_FAST_MODEL: ${LLM_CLOUD_FAST_MODEL:-}
+  LLM_CLOUD_STRONG_MODEL: ${LLM_CLOUD_STRONG_MODEL:-}
   LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-}
   LLM_LOCAL_API_KEY: ${LLM_LOCAL_API_KEY:-}
   LLM_LOCAL_MODEL: ${LLM_LOCAL_MODEL:-}
@@ -83,7 +86,7 @@ services:
     build: { context: ./apps/api, target: api }
     restart: unless-stopped
     environment: *api-env
-    command: procrastinate --app=app.jobs.app worker --queues=ingest,llm
+    command: procrastinate --app=app.jobs.app worker --queues=ingest,docs,index,llm
     volumes:
       - ./apps/api:/app
     depends_on:
@@ -104,6 +107,28 @@ services:
     depends_on:
       api: { condition: service_started }
 
+  ollama:
+    # Modello linguistico locale: l'unico ammesso per le fonti riservate.
+    # In sviluppo gira su CPU con un modello piccolo; sul server si usa vLLM o Ollama su GPU.
+    image: ollama/ollama:0.40.13
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+
+  embedder:
+    # Embeddings per la ricerca (BGE-M3), solo sulla rete interna: nessuna porta esposta.
+    build:
+      context: ./apps/api
+      target: stt
+      args:
+        WITH_DIARIZATION: ${WITH_DIARIZATION:-0}
+    restart: unless-stopped
+    environment: *api-env
+    command: uvicorn app.embedder:app --host 0.0.0.0 --port 8001
+    volumes:
+      - ./apps/api:/app
+      - stt_models:/home/redazione/.cache
+
   web:
     image: node:22-alpine
     working_dir: /app
@@ -123,3 +148,4 @@ volumes:
   storage_data:
   web_node_modules:
   stt_models:
+  ollama_models:

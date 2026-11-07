@@ -279,6 +279,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/sources/web": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Web
+         * @description Acquisisce una pagina web: copia salvata ed estrazione del testo, in background.
+         */
+        post: operations["create_web_api_workspaces__workspace_id__sources_web_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/sources/{source_id}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprocess Source
+         * @description Ripete l'estrazione del testo di un documento o l'acquisizione di una pagina web.
+         */
+        post: operations["reprocess_source_api_workspaces__workspace_id__sources__source_id__reprocess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/sources/{source_id}": {
         parameters: {
             query?: never;
@@ -466,6 +506,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/diarize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Diarize
+         * @description Riconosce chi parla sulla trascrizione esistente, senza ritrascrivere.
+         */
+        post: operations["request_diarize_api_workspaces__workspace_id__transcripts__transcript_id__diarize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/transcripts/{transcript_id}/clean": {
         parameters: {
             query?: never;
@@ -500,10 +560,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search */
+        get: operations["search_api_workspaces__workspace_id__search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask */
+        post: operations["ask_api_workspaces__workspace_id__ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AskRequest */
+        AskRequest: {
+            /** Question */
+            question: string;
+            type?: components["schemas"]["SourceType"] | null;
+            /** Story Id */
+            story_id?: string | null;
+            /** Date From */
+            date_from?: string | null;
+            /** Date To */
+            date_to?: string | null;
+        };
+        /** AskResponse */
+        AskResponse: {
+            /** Answer */
+            answer: string | null;
+            /** Insufficient */
+            insufficient: boolean;
+            /**
+             * Passages
+             * @description Numerati a partire da 1, nell'ordine dei rimandi [n]
+             */
+            passages: components["schemas"]["SearchHit"][];
+            /**
+             * Unverified Quotes
+             * @description Citazioni «» non trovate alla lettera nei passaggi
+             */
+            unverified_quotes: string[];
+            /** Model */
+            model: string | null;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
         /** AssetOut */
         AssetOut: {
             /**
@@ -635,6 +762,52 @@ export interface components {
          * @enum {string}
          */
         Role: "owner" | "editor" | "journalist";
+        /** SearchHit */
+        SearchHit: {
+            /**
+             * Segment Id
+             * Format: uuid
+             */
+            segment_id: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Source Title */
+            source_title: string;
+            source_type: components["schemas"]["SourceType"];
+            /** Source Date */
+            source_date: string | null;
+            confidentiality: components["schemas"]["Confidentiality"];
+            /** Start */
+            start: number | null;
+            /** End */
+            end: number | null;
+            /** Page */
+            page: number | null;
+            /** Speaker */
+            speaker: string | null;
+            /**
+             * Snippet
+             * @description Estratto; le parole trovate sono tra ⟦ e ⟧
+             */
+            snippet: string;
+            /** Score */
+            score: number;
+            /** Matched */
+            matched: string[];
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Results */
+            results: components["schemas"]["SearchHit"][];
+            /**
+             * Semantic
+             * @description False se la ricerca per significato non era disponibile
+             */
+            semantic: boolean;
+        };
         /** SegmentOut */
         SegmentOut: {
             /**
@@ -645,9 +818,11 @@ export interface components {
             /** Idx */
             idx: number;
             /** Start */
-            start: number;
+            start: number | null;
             /** End */
-            end: number;
+            end: number | null;
+            /** Page */
+            page: number | null;
             /** Speaker Id */
             speaker_id: string | null;
             /** Text Raw */
@@ -697,6 +872,8 @@ export interface components {
             status_detail: string | null;
             /** Note Text */
             note_text: string | null;
+            /** Url */
+            url?: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -856,6 +1033,9 @@ export interface components {
             clean_model: string | null;
             /** Clean Error */
             clean_error: string | null;
+            diarize_status: components["schemas"]["JobStatus"];
+            /** Diarize Error */
+            diarize_error: string | null;
             /**
              * Created At
              * Format: date-time
@@ -874,6 +1054,11 @@ export interface components {
             clean_available: boolean;
             /** Clean Unavailable Reason */
             clean_unavailable_reason?: string | null;
+            /**
+             * Diarization Available
+             * @default false
+             */
+            diarization_available: boolean;
         };
         /** TranscriptSummary */
         TranscriptSummary: {
@@ -906,6 +1091,9 @@ export interface components {
             clean_model: string | null;
             /** Clean Error */
             clean_error: string | null;
+            diarize_status: components["schemas"]["JobStatus"];
+            /** Diarize Error */
+            diarize_error: string | null;
             /**
              * Created At
              * Format: date-time
@@ -938,6 +1126,19 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WebCreate */
+        WebCreate: {
+            /** Url */
+            url: string;
+            /** Title */
+            title?: string | null;
+            /** Source Date */
+            source_date?: string | null;
+            /** @default normal */
+            confidentiality: components["schemas"]["Confidentiality"];
+            /** Story Id */
+            story_id?: string | null;
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -1530,6 +1731,73 @@ export interface operations {
             };
         };
     };
+    create_web_api_workspaces__workspace_id__sources_web_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reprocess_source_api_workspaces__workspace_id__sources__source_id__reprocess_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_source_api_workspaces__workspace_id__sources__source_id__get: {
         parameters: {
             query?: never;
@@ -1938,6 +2206,38 @@ export interface operations {
             };
         };
     };
+    request_diarize_api_workspaces__workspace_id__transcripts__transcript_id__diarize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transcript_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     request_clean_api_workspaces__workspace_id__transcripts__transcript_id__clean_post: {
         parameters: {
             query?: never;
@@ -1992,6 +2292,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_workspaces__workspace_id__search_get: {
+        parameters: {
+            query: {
+                q: string;
+                type?: components["schemas"]["SourceType"] | null;
+                story_id?: string | null;
+                source_id?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_api_workspaces__workspace_id__ask_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskResponse"];
                 };
             };
             /** @description Validation Error */

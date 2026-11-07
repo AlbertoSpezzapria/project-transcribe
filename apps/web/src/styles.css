@@ -149,3 +149,16 @@ body {
   background: var(--accent);
   color: var(--accent-contrast);
 }
+
+/* Passaggio raggiunto da un risultato di ricerca */
+@keyframes flash {
+  from {
+    background: var(--warning-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+.flash {
+  animation: flash 2.5s ease-out;
+}

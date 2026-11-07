@@ -23,7 +23,7 @@ from app.models import (
     Story,
     StorySource,
 )
-from app.schemas import AssetOut, NoteCreate, SourceOut, SourceUpdate
+from app.schemas import AssetOut, NoteCreate, SourceOut, SourceUpdate, WebCreate
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["sources"])
 
@@ -164,6 +164,12 @@ def create_note(body: NoteCreate, request: Request, ctx: WorkspaceContext = Depe
     ctx.db.flush()
     if body.story_id is not None:
         ctx.db.add(StorySource(workspace_id=ctx.workspace_id, story_id=body.story_id, source_id=source.id))
+    # Il testo della nota diventa subito cercabile, diviso in paragrafi
+    from app.pipeline.documents import text_to_paragraphs
+
+    jobs.save_text_version(
+        ctx.db, source, engine="note", paragraphs=text_to_paragraphs(body.text), user_id=ctx.user.id
+    )
     audit(
         ctx.db,
         "source.note_created",
@@ -174,6 +180,67 @@ def create_note(body: NoteCreate, request: Request, ctx: WorkspaceContext = Depe
         object_id=source.id,
     )
     ctx.db.commit()
+    jobs.queue_index(source)
+    ctx.db.refresh(source)
+    return source_out(ctx, source)
+
+
+@router.post("/sources/web", response_model=SourceOut, status_code=201)
+def create_web(body: WebCreate, request: Request, ctx: WorkspaceContext = Depends(workspace_context)):
+    """Acquisisce una pagina web: copia salvata ed estrazione del testo, in background."""
+    from app.pipeline.web import FetchError, check_url
+
+    _check_story(ctx.db, body.story_id)
+    try:
+        url = check_url(body.url)
+    except FetchError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    title = (body.title or "").strip()
+    source = Source(
+        workspace_id=ctx.workspace_id,
+        type=SourceType.web,
+        title=title or url.split("//", 1)[-1][:300],
+        url=url,
+        source_date=body.source_date,
+        confidentiality=body.confidentiality,
+        created_by=ctx.user.id,
+        status=SourceStatus.uploaded,
+        status_detail="In coda per l'acquisizione",
+        # Il titolo provvisorio verrà sostituito da quello della pagina
+        meta={} if title else {"auto_title": True},
+    )
+    ctx.db.add(source)
+    ctx.db.flush()
+    if body.story_id is not None:
+        ctx.db.add(StorySource(workspace_id=ctx.workspace_id, story_id=body.story_id, source_id=source.id))
+    audit(
+        ctx.db,
+        "source.web_added",
+        request=request,
+        user_id=ctx.user.id,
+        workspace_id=ctx.workspace_id,
+        object_type="source",
+        object_id=source.id,
+    )
+    ctx.db.commit()
+    jobs.fetch_web.defer(workspace_id=str(ctx.workspace_id), source_id=str(source.id))
+    ctx.db.refresh(source)
+    return source_out(ctx, source)
+
+
+@router.post("/sources/{source_id}/reprocess", response_model=SourceOut, status_code=202)
+def reprocess_source(source_id: uuid.UUID, ctx: WorkspaceContext = Depends(workspace_context)):
+    """Ripete l'estrazione del testo di un documento o l'acquisizione di una pagina web."""
+    source = _get_source(ctx, source_id)
+    if source.type not in (SourceType.document, SourceType.web):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Per audio e video si usa la nuova trascrizione")
+    if source.status in (SourceStatus.uploaded, SourceStatus.processing):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Elaborazione già in corso")
+    source.status = SourceStatus.processing
+    source.status_detail = "In coda"
+    ctx.db.commit()
+    task = jobs.extract_document if source.type == SourceType.document else jobs.fetch_web
+    task.defer(workspace_id=str(ctx.workspace_id), source_id=str(source.id))
     ctx.db.refresh(source)
     return source_out(ctx, source)
 
@@ -268,8 +335,11 @@ def asset_content(
         "Content-Length": str(end - start + 1),
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(asset.filename)}",
         "Cache-Control": "private, no-store",
-        "Content-Security-Policy": "sandbox",
     }
+    # Tutto ciò che il browser potrebbe eseguire (HTML delle pagine salvate, SVG...) resta
+    # isolato. I PDF fanno eccezione: il visualizzatore del browser non funziona in sandbox.
+    if asset.mime_type != "application/pdf":
+        headers["Content-Security-Policy"] = "sandbox"
     if partial:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     return StreamingResponse(

@@ -126,20 +126,24 @@ function SourceRow({
           {original && source.type === "audio" && (
             <audio controls preload="metadata" className="w-full" src={assetUrl(workspaceId, original.id)} />
           )}
-          {source.note_text && <p className="whitespace-pre-wrap text-sm">{source.note_text}</p>}
+          {source.note_text && <p className="line-clamp-4 whitespace-pre-wrap text-sm">{source.note_text}</p>}
+          {source.url && <p className="truncate text-xs text-muted">{source.url}</p>}
           {original && (
             <p className="font-mono text-[11px] text-muted" title="Impronta SHA-256 dell'originale">
               {original.filename} · sha256 {original.sha256.slice(0, 16)}…
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            {(source.type === "audio" || source.type === "video") && (
-              <Link to="/w/$workspaceId/fonti/$sourceId" params={{ workspaceId, sourceId: source.id }}>
-                <Button size="sm">
-                  <ScrollText className="size-3.5" /> {source.status === "ready" ? "Apri la trascrizione" : "Apri"}
-                </Button>
-              </Link>
-            )}
+            <Link to="/w/$workspaceId/fonti/$sourceId" params={{ workspaceId, sourceId: source.id }}>
+              <Button size="sm">
+                <ScrollText className="size-3.5" />{" "}
+                {source.status !== "ready"
+                  ? "Apri"
+                  : source.type === "audio" || source.type === "video"
+                    ? "Apri la trascrizione"
+                    : "Leggi"}
+              </Button>
+            </Link>
             {original && (
               <a href={assetUrl(workspaceId, original.id, true)}>
                 <Button variant="secondary" size="sm">
@@ -309,6 +313,66 @@ export function NoteDialog({
           </Button>
           <Button type="submit" loading={create.isPending}>
             Salva nota
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+
+export function WebDialog({
+  workspaceId,
+  storyId,
+  open,
+  onClose,
+}: {
+  workspaceId: string;
+  storyId?: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const invalidate = useInvalidateSources(workspaceId);
+  const [url, setUrl] = useState("");
+  const [confidentiality, setConfidentiality] = useState<Confidentiality>("normal");
+  const create = useMutation({
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/workspaces/{workspace_id}/sources/web", {
+          params: { path: { workspace_id: workspaceId } },
+          body: { url, story_id: storyId ?? null, confidentiality },
+        }),
+      ),
+    onSuccess: () => {
+      invalidate();
+      setUrl("");
+      onClose();
+    },
+  });
+  return (
+    <Dialog open={open} onClose={onClose} title="Aggiungi una pagina web">
+      <form onSubmit={(e) => (e.preventDefault(), create.mutate())} className="space-y-4">
+        {create.error && <Alert>{create.error.message}</Alert>}
+        <Field
+          label="Indirizzo"
+          hint="Viene salvata una copia della pagina com'è adesso, con data e ora: resta consultabile anche se l'articolo cambia o sparisce."
+          htmlFor="web-url"
+        >
+          <Input id="web-url" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+        </Field>
+        <Field label="Riservatezza" htmlFor="web-conf">
+          <Select id="web-conf" value={confidentiality} onChange={(e) => setConfidentiality(e.target.value as Confidentiality)}>
+            <option value="normal">Normale</option>
+            <option value="confidential">Riservata — solo elaborazione interna</option>
+            <option value="secret">Segreta — esclusa da anteprime e log</option>
+          </Select>
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Annulla
+          </Button>
+          <Button type="submit" loading={create.isPending}>
+            Aggiungi
           </Button>
         </div>
       </form>

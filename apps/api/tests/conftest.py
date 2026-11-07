@@ -22,8 +22,17 @@ os.environ["MIGRATIONS_DATABASE_URL"] = _swap_db(os.environ["MIGRATIONS_DATABASE
 os.environ["S3_BUCKET"] = "redazione-test"
 os.environ["ENV"] = "test"
 os.environ["STT_ENGINE"] = "fake"
+# Nessun embedder nei test: la ricerca per significato si prova con un embedding finto
+os.environ["EMBEDDER_URL"] = "http://127.0.0.1:9"
 os.environ["DIARIZATION_ENABLED"] = "false"
-for _k in ("LLM_CLOUD_API_KEY", "LLM_CLOUD_MODEL", "LLM_LOCAL_BASE_URL", "LLM_LOCAL_MODEL"):
+for _k in (
+    "LLM_CLOUD_API_KEY",
+    "LLM_CLOUD_MODEL",
+    "LLM_CLOUD_FAST_MODEL",
+    "LLM_CLOUD_STRONG_MODEL",
+    "LLM_LOCAL_BASE_URL",
+    "LLM_LOCAL_MODEL",
+):
     os.environ.pop(_k, None)
 
 

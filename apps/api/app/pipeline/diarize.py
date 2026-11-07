@@ -20,9 +20,14 @@ class DiarizationUnavailable(RuntimeError):
     pass
 
 
-def available() -> bool:
+def configured() -> bool:
+    """Attivata nella configurazione (l'API non ha pyannote installato: lo usa solo il worker)."""
     s = get_settings()
-    if not (s.diarization_enabled and s.hf_token):
+    return bool(s.diarization_enabled and s.hf_token)
+
+
+def available() -> bool:
+    if not configured():
         return False
     try:
         import pyannote.audio  # noqa: F401
@@ -40,7 +45,17 @@ def _load():
         except ImportError as exc:
             raise DiarizationUnavailable("pyannote.audio non installato") from exc
         s = get_settings()
-        pipeline = Pipeline.from_pretrained(s.diarization_model, token=s.hf_token)
+        try:
+            pipeline = Pipeline.from_pretrained(s.diarization_model, token=s.hf_token)
+        except Exception as exc:
+            text = str(exc)
+            if "gated" in text.lower() or "403" in text:
+                raise DiarizationUnavailable(
+                    f"Licenza del modello {s.diarization_model} non ancora accettata su Hugging Face"
+                ) from exc
+            if "401" in text:
+                raise DiarizationUnavailable("Token Hugging Face non valido") from exc
+            raise DiarizationUnavailable("Modello di riconoscimento delle voci non scaricabile") from exc
         if pipeline is None:
             raise DiarizationUnavailable("Modello di diarization non accessibile (licenza o token)")
         if torch.cuda.is_available():

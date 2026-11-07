@@ -51,15 +51,33 @@ class Settings(BaseSettings):
     diarization_model: str = "pyannote/speaker-diarization-community-1"
     hf_token: str | None = None
 
-    # Gateway LLM (API compatibile OpenAI: OpenRouter, vLLM, Ollama...).
-    # Profilo "cloud": solo per le fonti normali. Profilo "local": per tutte, comprese le riservate.
+    # Gateway LLM (API compatibile OpenAI: fornitore diretto, OpenRouter, vLLM, Ollama...).
+    # Profili cloud: solo per le fonti normali. Profilo locale: per tutte, comprese le riservate.
+    # Ogni funzione ha un livello (semplice/medio/difficile) che sceglie il profilo: vedi app/llm.py.
     llm_cloud_base_url: str = "https://openrouter.ai/api/v1"
     llm_cloud_api_key: str | None = None
-    llm_cloud_model: str | None = None
+    llm_cloud_model: str | None = None  # predefinito per entrambi i profili cloud
+    llm_cloud_fast_model: str | None = None  # compiti medi (es. Claude Haiku)
+    llm_cloud_strong_model: str | None = None  # compiti difficili (es. Claude Sonnet)
+    # I compiti semplici vanno al modello locale anche per le fonti normali, se c'è.
+    llm_prefer_local_for_simple: bool = True
     llm_local_base_url: str | None = None
     llm_local_api_key: str | None = None
     llm_local_model: str | None = None
     llm_timeout_seconds: float = 120.0
+
+    # Ricerca: servizio interno degli embeddings (immagine "stt"), modello multilingue locale
+    embedder_url: str = "http://localhost:8001"
+    embedding_model: str = "BAAI/bge-m3"
+    embedder_timeout_seconds: float = 120.0
+    # Sotto questa similarità (coseno) un passaggio trovato solo per significato è rumore.
+    # Tarata su BGE-M3 con interviste e documenti in italiano.
+    semantic_min_similarity: float = 0.45
+
+    # Acquisizione di pagine web
+    web_max_bytes: int = 15 * 1024 * 1024
+    web_timeout_seconds: float = 20.0
+    web_user_agent: str = "Mozilla/5.0 (compatible; RedazioneArchivio/0.1)"
 
     @property
     def is_production(self) -> bool:

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeft,
+  AudioLines,
   Check,
   Download,
   Gauge,
@@ -20,6 +21,7 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { confidentialityLabel, typeLabel } from "@/components/sources";
+import { DocumentView } from "@/routes/document";
 import { Alert, Badge, Button, Dialog, Field, Input, Select, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError, assetUrl, unwrap, type Schemas } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
@@ -65,6 +67,7 @@ function isTyping(el: EventTarget | null) {
 
 export function SourcePage() {
   const { workspaceId, sourceId } = useParams({ strict: false }) as { workspaceId: string; sourceId: string };
+  const { seg } = useSearch({ strict: false }) as { seg?: string };
   const path = { workspace_id: workspaceId, source_id: sourceId };
 
   const source = useQuery({
@@ -75,7 +78,8 @@ export function SourcePage() {
   const isMedia = source.data?.type === "audio" || source.data?.type === "video";
   const transcript = useQuery({
     queryKey: ["transcript", workspaceId, sourceId],
-    enabled: isMedia,
+    // Per documenti, web e note il testo esiste solo a elaborazione finita
+    enabled: !!source.data && (isMedia || source.data.status === "ready"),
     retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 2,
     // openapi-fetch allarga le tuple delle parole: il tipo dichiarato è quello dello schema
     queryFn: async () =>
@@ -85,7 +89,11 @@ export function SourcePage() {
     refetchInterval: (q) => {
       const t = q.state.data;
       if (!t) return source.data?.status === "processing" ? 3000 : false;
-      const busy = BUSY.includes(t.status) || BUSY.includes(t.clean_status) || (t.pending && BUSY.includes(t.pending.status));
+      const busy =
+        BUSY.includes(t.status) ||
+        BUSY.includes(t.clean_status) ||
+        BUSY.includes(t.diarize_status) ||
+        (t.pending && BUSY.includes(t.pending.status));
       return busy ? 3000 : false;
     },
   });
@@ -115,19 +123,7 @@ export function SourcePage() {
         {isMedia && transcript.data && <TranscriptActions workspaceId={workspaceId} sourceId={sourceId} transcript={transcript.data} />}
       </div>
 
-      {!isMedia && (
-        <div className="space-y-3">
-          {s.note_text && <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface p-4 text-sm">{s.note_text}</p>}
-          {original && (
-            <a href={assetUrl(workspaceId, original.id, true)}>
-              <Button variant="secondary">
-                <Download className="size-4" /> Scarica l'originale
-              </Button>
-            </a>
-          )}
-          <p className="text-sm text-muted">L'anteprima e la ricerca nei documenti arrivano con la Fase 3.</p>
-        </div>
-      )}
+      {!isMedia && <DocumentView workspaceId={workspaceId} source={s} transcript={transcript.data} loading={transcript.isLoading} seg={seg} />}
 
       {isMedia && original && (
         <>
@@ -146,6 +142,7 @@ export function SourcePage() {
               isVideo={s.type === "video"}
               transcript={transcript.data}
               statusDetail={s.status_detail}
+              seg={seg}
             />
           )}
         </>
@@ -154,7 +151,7 @@ export function SourcePage() {
   );
 }
 
-function JobProgress({ label, progress, failed }: { label: string; progress: number | null; failed?: boolean }) {
+export function JobProgress({ label, progress, failed }: { label: string; progress: number | null; failed?: boolean }) {
   if (failed) return <Alert>{label}</Alert>;
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
@@ -315,6 +312,7 @@ function TranscriptWorkspace({
   isVideo,
   transcript: t,
   statusDetail,
+  seg,
 }: {
   workspaceId: string;
   sourceId: string;
@@ -322,6 +320,7 @@ function TranscriptWorkspace({
   isVideo: boolean;
   transcript: Transcript;
   statusDetail: string | null;
+  seg?: string;
 }) {
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -350,7 +349,7 @@ function TranscriptWorkspace({
     (time: number) => {
       const list = listRef.current;
       if (!list) return;
-      const si = findAt(segments, time, (s) => s.start);
+      const si = findAt(segments, time, (s) => s.start ?? 0);
       const cur = active.current;
       if (si !== cur.seg) {
         list.querySelector(".seg-row.is-current")?.classList.remove("is-current");
@@ -362,7 +361,7 @@ function TranscriptWorkspace({
         cur.seg = si;
       }
       let word: Element | null = null;
-      if (si >= 0 && time <= segments[si].end + 0.3) {
+      if (si >= 0 && time <= (segments[si].end ?? 0) + 0.3) {
         const words = segments[si].words;
         const wi = findAt(words, time, (w) => w[1]);
         if (wi >= 0 && time <= words[wi][2] + 0.25) {
@@ -377,6 +376,24 @@ function TranscriptWorkspace({
     },
     [segments],
   );
+
+  // Arrivo da un risultato di ricerca: si porta il passaggio in vista e il player al suo inizio
+  const target = segments.findIndex((x) => x.id === seg);
+  useEffect(() => {
+    if (target < 0) return;
+    // Il DOM è già aggiornato quando l'effetto gira: niente requestAnimationFrame,
+    // che nelle schede in background non scatta.
+    const row = listRef.current?.querySelector(`[data-seg="${target}"]`);
+    row?.scrollIntoView({ block: "center" });
+    row?.classList.add("flash");
+    const m = mediaRef.current;
+    const start = segments[target].start;
+    if (!m || start == null) return;
+    // Prima che l'audio abbia i metadati la posizione non si può impostare
+    if (m.readyState >= 1) m.currentTime = start;
+    else m.addEventListener("loadedmetadata", () => (m.currentTime = start), { once: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
 
   const busy = BUSY.includes(t.status);
   if (busy || t.status === "failed") {
@@ -532,16 +549,22 @@ const MediaPlayer = memo(function MediaPlayer({
       cancelAnimationFrame(raf);
       tick();
     };
-    const onMeta = () => Number.isFinite(m.duration) && setDuration(m.duration);
+    const onMeta = () => {
+      if (Number.isFinite(m.duration)) setDuration(m.duration);
+      tick(); // la posizione può essere stata impostata prima del caricamento (link da ricerca)
+    };
     m.addEventListener("play", onPlay);
     m.addEventListener("pause", onPause);
     m.addEventListener("seeked", tick);
+    // Chrome applica la posizione impostata prima del caricamento senza "seeked"
+    m.addEventListener("timeupdate", tick);
     m.addEventListener("loadedmetadata", onMeta);
     return () => {
       cancelAnimationFrame(raf);
       m.removeEventListener("play", onPlay);
       m.removeEventListener("pause", onPause);
       m.removeEventListener("seeked", tick);
+      m.removeEventListener("timeupdate", tick);
       m.removeEventListener("loadedmetadata", onMeta);
     };
   }, [ref, onTime]);
@@ -611,7 +634,7 @@ const MediaPlayer = memo(function MediaPlayer({
     for (const s of segments) {
       const idx = s.speaker_id ? (speakerIndex.get(s.speaker_id) ?? 0) : 0;
       ctx.fillStyle = styles.getPropertyValue(`--spk-${(idx % 6) + 1}`).trim();
-      ctx.fillRect((s.start / total) * w, h - stripH, Math.max(1, ((s.end - s.start) / total) * w), stripH);
+      ctx.fillRect(((s.start ?? 0) / total) * w, h - stripH, Math.max(1, (((s.end ?? 0) - (s.start ?? 0)) / total) * w), stripH);
     }
     ctx.fillStyle = accent;
     ctx.fillRect(playedX - 0.5, 0, 1, waveH);
@@ -790,7 +813,7 @@ const SegmentList = memo(function SegmentList(props: ListProps) {
   );
 });
 
-function useSegmentPatch(workspaceId: string, sourceId: string) {
+export function useSegmentPatch(workspaceId: string, sourceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, body }: { id: string; body: Schemas["SegmentUpdate"] }) =>
@@ -848,7 +871,7 @@ const SegmentRow = memo(function SegmentRow({
     );
   } else if (mode === "clean") {
     body = (
-      <p className="cursor-pointer text-[15px] leading-relaxed" onClick={() => seek(s.start)}>
+      <p className="cursor-pointer text-[15px] leading-relaxed" onClick={() => seek(s.start ?? 0)}>
         {s.text_clean ?? (
           <>
             {verbatim} <span className="text-xs text-muted">(non semplificato)</span>
@@ -858,7 +881,7 @@ const SegmentRow = memo(function SegmentRow({
     );
   } else if (s.text_edited) {
     body = (
-      <p className="cursor-pointer text-[15px] leading-relaxed" onClick={() => seek(s.start)} title="Testo corretto: clic per ascoltare il passaggio">
+      <p className="cursor-pointer text-[15px] leading-relaxed" onClick={() => seek(s.start ?? 0)} title="Testo corretto: clic per ascoltare il passaggio">
         {s.text_edited}
       </p>
     );
@@ -913,8 +936,8 @@ const SegmentRow = memo(function SegmentRow({
           ))}
           <option value="__new">+ Nuovo…</option>
         </select>
-        <button className="font-mono text-muted tabular-nums hover:text-accent" onClick={() => seek(s.start)} title="Ascolta da qui">
-          {formatTime(s.start)}
+        <button className="font-mono text-muted tabular-nums hover:text-accent" onClick={() => seek(s.start ?? 0)} title="Ascolta da qui">
+          {formatTime(s.start ?? 0)}
         </button>
         {s.text_edited && !editing && <Badge tone="success">corretto</Badge>}
       </div>
@@ -999,7 +1022,7 @@ function NewSpeakerDialog({
   );
 }
 
-function SegmentEditor({
+export function SegmentEditor({
   initial,
   raw,
   saving,
@@ -1073,7 +1096,7 @@ function SpeakersPanel({
       if (!s.speaker_id) continue;
       const v = m.get(s.speaker_id) ?? { n: 0, secs: 0 };
       v.n += 1;
-      v.secs += s.end - s.start;
+      v.secs += (s.end ?? 0) - (s.start ?? 0);
       m.set(s.speaker_id, v);
     }
     return m;
@@ -1108,8 +1131,11 @@ function SpeakersPanel({
         <p className="mt-0.5 text-xs text-muted">
           {t.diarized
             ? "Voci riconosciute automaticamente: dai un nome a ciascuna, unisci quelle doppie."
-            : "Riconoscimento delle voci non attivo: assegna i passaggi dal menu accanto a ciascuno."}
+            : t.diarization_available
+              ? "Le voci non sono ancora state riconosciute: puoi farlo ora senza perdere le correzioni."
+              : "Riconoscimento delle voci non attivo: assegna i passaggi dal menu accanto a ciascuno."}
         </p>
+        <DiarizeButton workspaceId={workspaceId} sourceId={sourceId} transcript={t} />
         <ul className="mt-3 space-y-3">
           {t.speakers.map((sp) => {
             const st = stats.get(sp.id);
@@ -1176,5 +1202,43 @@ function SpeakersPanel({
         {t.duration ? ` · ${formatTime(t.duration)}` : ""}. Il testo riconosciuto resta conservato anche dopo le correzioni.
       </p>
     </aside>
+  );
+}
+
+function DiarizeButton({ workspaceId, sourceId, transcript: t }: { workspaceId: string; sourceId: string; transcript: Transcript }) {
+  const qc = useQueryClient();
+  const run = useMutation({
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/workspaces/{workspace_id}/transcripts/{transcript_id}/diarize", {
+          params: { path: { workspace_id: workspaceId, transcript_id: t.id } },
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["transcript", workspaceId, sourceId] }),
+  });
+  if (!t.diarization_available) return null;
+  const busy = BUSY.includes(t.diarize_status);
+  const start = () => {
+    const named = t.speakers.some((sp) => sp.name);
+    const msg =
+      "Il sistema riconosce chi parla e riassegna tutti i passaggi a Voce 1, Voce 2… " +
+      "Il testo e le correzioni restano; i passaggi non corretti in cui parlano due persone vengono divisi." +
+      (named ? " I nomi che hai dato agli interlocutori andranno riassegnati." : "");
+    if (confirm(msg)) run.mutate();
+  };
+  return (
+    <div className="mt-2 space-y-1">
+      {busy ? (
+        <p className="flex items-center gap-2 text-xs text-accent">
+          <RefreshCw className="size-3.5 animate-spin" /> Riconoscimento delle voci in corso… può richiedere alcuni minuti.
+        </p>
+      ) : (
+        <Button variant={t.diarized ? "ghost" : "secondary"} size="sm" onClick={start} loading={run.isPending}>
+          <AudioLines className="size-3.5" /> {t.diarized ? "Rifai il riconoscimento delle voci" : "Riconosci le voci"}
+        </Button>
+      )}
+      {t.diarize_status === "failed" && <p className="text-xs text-danger">{t.diarize_error}</p>}
+      {run.error && <p className="text-xs text-danger">{run.error.message}</p>}
+    </div>
   );
 }

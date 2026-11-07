@@ -62,19 +62,27 @@ def test_clean_check_protects_names_and_numbers():
     assert clean.check(orig, "Servono soldi.") == "lunghezza troppo diversa"
 
 
-def test_llm_routing_by_confidentiality(monkeypatch):
+def test_llm_routing_by_task_and_confidentiality(monkeypatch):
     from app.config import get_settings
-    from app.models import Confidentiality
+    from app.models import Confidentiality as C
 
     s = get_settings()
     monkeypatch.setattr(s, "llm_cloud_api_key", "k")
-    monkeypatch.setattr(s, "llm_cloud_model", "m")
-    assert llm.profile_for(Confidentiality.normal).name == "cloud"
-    assert llm.profile_for(Confidentiality.confidential) is None
-    assert llm.profile_for(Confidentiality.secret) is None
+    monkeypatch.setattr(s, "llm_cloud_fast_model", "veloce")
+    monkeypatch.setattr(s, "llm_cloud_strong_model", "forte")
+    T = llm.Task
+    assert llm.route(T.clean, [C.normal]).name == "cloud_fast"  # nessun locale: ripiega sul cloud
+    assert llm.route(T.ask, [C.normal]).model == "forte"
+    assert llm.route(T.summarize, [C.normal]).model == "veloce"
+    # Contesto misto: vince il livello più restrittivo
+    assert llm.route(T.ask, [C.normal, C.confidential]) is None
+    assert llm.route(T.clean, [C.secret]) is None
+
     monkeypatch.setattr(s, "llm_local_base_url", "http://llm:8000/v1")
     monkeypatch.setattr(s, "llm_local_model", "locale")
-    assert llm.profile_for(Confidentiality.secret).name == "local"
+    assert llm.route(T.clean, [C.normal]).is_local  # i compiti semplici preferiscono il locale
+    assert llm.route(T.ask, [C.normal]).model == "forte"
+    assert llm.route(T.ask, [C.normal, C.secret]).is_local
 
 
 # --- Flusso completo con il motore finto ------------------------------------------
@@ -247,3 +255,50 @@ def test_retry_after_failure_replaces_failed_version(client):
     r = client.post(f"{base}/sources/{sid}/transcribe", json={"language": "it"})
     assert r.status_code == 202 and r.json()["is_current"] is True
     assert client.get(f"{base}/sources/{sid}/transcript").json()["id"] == r.json()["id"]
+
+
+def test_rediarize_keeps_edits_and_splits_mixed_passages(client, monkeypatch):
+    from app.config import get_settings
+    from app.models import Segment
+    from app.pipeline import diarize
+    from app.pipeline.segmentation import Turn
+
+    ws, sid = _transcribed_source(client, "voci@example.com")
+    base = f"/api/workspaces/{ws}"
+    t = client.get(f"{base}/sources/{sid}/transcript").json()
+    assert t["diarization_available"] is False
+    assert client.post(f"{base}/transcripts/{t['id']}/diarize").status_code == 400
+
+    s = get_settings()
+    monkeypatch.setattr(s, "diarization_enabled", True)
+    monkeypatch.setattr(s, "hf_token", "hf_prova")
+    # Testo finto: tre frasi in 10 secondi. A parla fino a 3,2 s, poi B fino a 7, poi di nuovo A.
+    # La prima frase ("Buongiorno, sono l'assessore Mario Rossi.") va da 0 a ~2,9 s; la seconda
+    # attraversa il cambio di voce a 7 s e va divisa; la terza viene prima corretta a mano.
+    segs = t["segments"]
+    assert len(segs) == 3
+    client.patch(f"{base}/segments/{segs[2]['id']}", json={"text": "I lavori partiranno nel 2027."})
+    monkeypatch.setattr(jobs, "_load_samples", lambda source: None)
+    monkeypatch.setattr(
+        diarize, "diarize", lambda *a: [Turn(0, 3.2, "A"), Turn(3.2, 7.0, "B"), Turn(7.0, 10, "A")]
+    )
+    assert client.get(f"{base}/sources/{sid}/transcript").json()["diarization_available"] is True
+    assert client.post(f"{base}/transcripts/{t['id']}/diarize").status_code == 202
+    jobs.rediarize_transcript(workspace_id=str(ws), source_id=sid, transcript_id=t["id"])
+
+    t2 = client.get(f"{base}/sources/{sid}/transcript").json()
+    assert t2["diarized"] and t2["diarize_status"] == "ready"
+    names = {sp["id"]: sp["label"] for sp in t2["speakers"]}
+    assert sorted(names.values()) == ["Voce 1", "Voce 2"]
+    who = [names[s["speaker_id"]] for s in t2["segments"]]
+    assert who[0] == "Voce 1" and "Voce 2" in who
+    assert len(t2["segments"]) == 4  # la frase a cavallo del cambio di voce è stata divisa
+    assert [s["idx"] for s in t2["segments"]] == [0, 1, 2, 3]
+    # La correzione resta, sullo stesso passaggio
+    edited = [s for s in t2["segments"] if s["text_edited"]]
+    assert edited and edited[0]["id"] == segs[2]["id"] and edited[0]["text_edited"].endswith("2027.")
+    # Il testo complessivo non cambia
+    assert " ".join(s["text_raw"] for s in t2["segments"]) == " ".join(s["text_raw"] for s in segs)
+    with SessionLocal() as db:
+        bind_workspace(db, ws)
+        assert db.query(Segment).filter_by(transcript_id=uuid.UUID(t["id"])).count() == 4

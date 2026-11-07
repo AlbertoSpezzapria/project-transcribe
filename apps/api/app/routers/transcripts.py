@@ -12,6 +12,7 @@ from app import jobs, llm
 from app.audit import audit
 from app.deps import WorkspaceContext, workspace_context
 from app.models import JobStatus, Segment, Source, SourceType, Speaker, Transcript
+from app.pipeline import diarize
 from app.routers.sources import _get_source
 from app.schemas import (
     SegmentOut,
@@ -71,7 +72,7 @@ def _transcript_out(ctx: WorkspaceContext, source: Source, t: Transcript) -> Tra
         select(Segment).where(Segment.transcript_id == t.id).order_by(Segment.idx)
     ).all()
     pending = _pending(ctx, t)
-    profile = llm.profile_for(source.confidentiality)
+    profile = llm.route(llm.Task.clean, [source.confidentiality])
     return TranscriptOut(
         **TranscriptSummary.model_validate(t).model_dump(),
         peaks=t.peaks,
@@ -79,7 +80,8 @@ def _transcript_out(ctx: WorkspaceContext, source: Source, t: Transcript) -> Tra
         segments=[SegmentOut.model_validate(s) for s in segments],
         pending=TranscriptSummary.model_validate(pending) if pending else None,
         clean_available=profile is not None,
-        clean_unavailable_reason=None if profile else llm.unavailable_reason(source.confidentiality),
+        clean_unavailable_reason=None if profile else llm.unavailable_reason([source.confidentiality]),
+        diarization_available=diarize.configured() and source.type in (SourceType.audio, SourceType.video),
     )
 
 
@@ -160,6 +162,7 @@ def update_segment(
     if seg is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Segmento non trovato")
     data = body.model_dump(exclude_unset=True)
+    reindex = False
     if "text" in data:
         text = (data["text"] or "").strip()
         # Testo uguale al verbatim (o vuoto) = nessuna correzione
@@ -167,6 +170,8 @@ def update_segment(
         if new != seg.text_edited:
             seg.text_edited = new
             seg.text_clean = None  # la versione pulita va rigenerata per questo passaggio
+            seg.embedding = None  # e l'indice per la ricerca va ricalcolato
+            reindex = True
     if "speaker_id" in data:
         if data["speaker_id"] is not None:
             sp = _get_speaker(ctx, data["speaker_id"])
@@ -176,6 +181,11 @@ def update_segment(
     seg.edited_by = ctx.user.id
     seg.edited_at = datetime.now(UTC)
     ctx.db.commit()
+    if reindex:
+        t = ctx.db.get(Transcript, seg.transcript_id)
+        source = ctx.db.get(Source, t.source_id) if t else None
+        if source is not None and t.is_current:
+            jobs.queue_index(source)
     return SegmentOut.model_validate(seg)
 
 
@@ -222,6 +232,31 @@ def merge_speaker(
     ctx.db.commit()
 
 
+# --- Riconoscimento delle voci ------------------------------------------------------
+
+
+@router.post("/transcripts/{transcript_id}/diarize", response_model=TranscriptSummary, status_code=202)
+def request_diarize(transcript_id: uuid.UUID, ctx: WorkspaceContext = Depends(workspace_context)):
+    """Riconosce chi parla sulla trascrizione esistente, senza ritrascrivere."""
+    t = _get_transcript(ctx, transcript_id)
+    source = _get_source(ctx, t.source_id)
+    if source.type not in (SourceType.audio, SourceType.video):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Solo per audio e video")
+    if not diarize.configured():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Riconoscimento delle voci non configurato")
+    if t.status != JobStatus.ready:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La trascrizione non è ancora pronta")
+    if t.diarize_status in _BUSY:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Riconoscimento delle voci già in corso")
+    t.diarize_status = JobStatus.queued
+    t.diarize_error = None
+    ctx.db.commit()
+    jobs.rediarize_transcript.defer(
+        workspace_id=str(ctx.workspace_id), source_id=str(source.id), transcript_id=str(t.id)
+    )
+    return TranscriptSummary.model_validate(t)
+
+
 # --- Versione pulita ---------------------------------------------------------------
 
 
@@ -233,8 +268,8 @@ def request_clean(transcript_id: uuid.UUID, ctx: WorkspaceContext = Depends(work
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La trascrizione non è ancora pronta")
     if t.clean_status in _BUSY:
         raise HTTPException(status.HTTP_409_CONFLICT, "Versione pulita già in preparazione")
-    if llm.profile_for(source.confidentiality) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, llm.unavailable_reason(source.confidentiality))
+    if llm.route(llm.Task.clean, [source.confidentiality]) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, llm.unavailable_reason([source.confidentiality]))
     t.clean_status = JobStatus.queued
     t.clean_error = None
     ctx.db.commit()
@@ -277,9 +312,12 @@ def export_transcript(
         verbatim = s.text_edited or s.text_raw
         return (s.text_clean or verbatim) if text == "clean" else verbatim
 
+    is_media = source.type in (SourceType.audio, SourceType.video)
+    if format == "srt" and not is_media:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "I sottotitoli esistono solo per audio e video")
     if format == "srt":
         content = "\n".join(
-            f"{i}\n{_ts(s.start, True)} --> {_ts(s.end, True)}\n"
+            f"{i}\n{_ts(s.start or 0, True)} --> {_ts(s.end or 0, True)}\n"
             f"{names.get(s.speaker_id, '') + ': ' if s.speaker_id else ''}{body(s)}\n"
             for i, s in enumerate(segments, start=1)
         )
@@ -289,10 +327,21 @@ def export_transcript(
             header += f"Data: {source.source_date.isoformat()}\n"
         if text == "clean":
             header += "Versione pulita: non usare per le citazioni testuali.\n"
-        lines = [
-            f"[{_ts(s.start)}] {names.get(s.speaker_id, 'Voce') if s.speaker_id else 'Voce'}: {body(s)}"
-            for s in segments
-        ]
+        if is_media:
+            lines = [
+                f"[{_ts(s.start or 0)}] {names.get(s.speaker_id, 'Voce') if s.speaker_id else 'Voce'}: "
+                f"{body(s)}"
+                for s in segments
+            ]
+        else:
+            lines, page = [], None
+            for s in segments:
+                if s.page is not None and s.page != page:
+                    page = s.page
+                    lines.append(f"— Pagina {page} —")
+                lines.append(body(s))
+        if source.url:
+            header += f"Indirizzo: {source.url}\n"
         content = header + "\n" + "\n\n".join(lines) + "\n"
 
     audit(

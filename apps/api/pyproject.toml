@@ -21,6 +21,11 @@ dependencies = [
   "python-multipart>=0.0.9",
   "typer>=0.12",
   "httpx>=0.27",
+  "pgvector==0.5.1",
+  "pypdfium2==5.15.1",
+  "pillow>=11",
+  "python-docx==1.2.0",
+  "trafilatura==2.3.1",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +33,10 @@ dependencies = [
 stt = [
   "faster-whisper==1.2.1",
   "numpy>=1.26",
+]
+# Embeddings per la ricerca (servizio "embedder")
+embed = [
+  "sentence-transformers==6.2.0",
 ]
 # Riconoscimento degli interlocutori: torch + pyannote (pesante, opzionale)
 diarization = [
@@ -64,3 +73,5 @@ known-first-party = ["app"]
 
 [tool.ruff.lint.per-file-ignores]
 "app/pipeline/clean.py" = ["E501"]  # prompt in prosa
+"app/search.py" = ["E501"]  # prompt in prosa
+"tests/test_search.py" = ["E501"]  # HTML di prova

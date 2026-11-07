@@ -112,6 +112,7 @@ class SourceOut(ORM):
     status: SourceStatus
     status_detail: str | None
     note_text: str | None
+    url: str | None = None
     meta: dict = Field(serialization_alias="metadata")
     created_at: datetime
     assets: list[AssetOut] = []
@@ -121,6 +122,14 @@ class SourceOut(ORM):
 class NoteCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200_000)
+    source_date: date | None = None
+    confidentiality: Confidentiality = Confidentiality.normal
+    story_id: uuid.UUID | None = None
+
+
+class WebCreate(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    title: str | None = Field(default=None, max_length=300)
     source_date: date | None = None
     confidentiality: Confidentiality = Confidentiality.normal
     story_id: uuid.UUID | None = None
@@ -145,8 +154,9 @@ class SpeakerOut(ORM):
 class SegmentOut(ORM):
     id: uuid.UUID
     idx: int
-    start: float
-    end: float
+    start: float | None
+    end: float | None
+    page: int | None
     speaker_id: uuid.UUID | None
     text_raw: str
     text_edited: str | None
@@ -170,6 +180,8 @@ class TranscriptSummary(ORM):
     clean_status: JobStatus
     clean_model: str | None
     clean_error: str | None
+    diarize_status: JobStatus
+    diarize_error: str | None
     created_at: datetime
     completed_at: datetime | None
 
@@ -182,6 +194,7 @@ class TranscriptOut(TranscriptSummary):
     pending: TranscriptSummary | None = None
     clean_available: bool
     clean_unavailable_reason: str | None = None
+    diarization_available: bool = False
 
 
 class SegmentUpdate(BaseModel):
@@ -207,3 +220,44 @@ class TranscribeRequest(BaseModel):
     language: str | None = Field(
         default=None, pattern=r"^[a-z]{2}$", description="Codice ISO 639-1; null = automatica"
     )
+
+
+# --- Ricerca ---------------------------------------------------------------------------
+
+
+class SearchHit(BaseModel):
+    segment_id: uuid.UUID
+    source_id: uuid.UUID
+    source_title: str
+    source_type: SourceType
+    source_date: date | None
+    confidentiality: Confidentiality
+    start: float | None
+    end: float | None
+    page: int | None
+    speaker: str | None
+    snippet: str = Field(description="Estratto; le parole trovate sono tra ⟦ e ⟧")
+    score: float
+    matched: list[str]
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchHit]
+    semantic: bool = Field(description="False se la ricerca per significato non era disponibile")
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=1000)
+    type: SourceType | None = None
+    story_id: uuid.UUID | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+
+
+class AskResponse(BaseModel):
+    answer: str | None
+    insufficient: bool
+    passages: list[SearchHit] = Field(description="Numerati a partire da 1, nell'ordine dei rimandi [n]")
+    unverified_quotes: list[str] = Field(description="Citazioni «» non trovate alla lettera nei passaggi")
+    model: str | None
+    unavailable_reason: str | None = None

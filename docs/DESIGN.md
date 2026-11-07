@@ -484,3 +484,62 @@ In entrambi i casi il gateway LLM resta astratto, così il passaggio da un'opzio
 - Immagine `stt` con base CUDA per il server con GPU; modelli scaricati in anticipo e `HF_HUB_OFFLINE=1` in produzione.
 - Vocabolario personalizzato (nomi, sigle) passato al modello come contesto iniziale.
 - Modifiche concorrenti allo stesso passaggio: oggi vince l'ultima.
+
+### Fase 3 — 7 novembre 2026
+**Fatto**
+- **Gateway LLM per funzione**: ogni funzione ha un livello (semplice, medio, difficile) e tre profili (`local`, `cloud_fast`, `cloud_strong`). Se il contesto contiene anche una sola fonte riservata si usa solo il locale. I compiti semplici preferiscono il locale anche per le fonti normali.
+- **Documenti**: PDF (pypdfium2), DOCX, ODT e testo diventano paragrafi citabili con la pagina, ricostruendo i paragrafi dalle righe impaginate e riunendo le parole spezzate. Le pagine senza testo passano dall'OCR (tesseract ita+eng), con un avviso nell'interfaccia. I paragrafi si correggono come i passaggi audio. Il PDF si apre nel visualizzatore del browser alla pagina giusta.
+- **Pagine web**: acquisizione con protezioni SSRF (vedi sotto). Si salvano una copia della pagina (servita in sandbox) e il testo dell'articolo (trafilatura), con titolo, autore, data, sito, indirizzo finale e ora di acquisizione. Le tabelle diventano paragrafi leggibili. Un link a un PDF viene trattato come documento.
+- **Note**: il testo diventa subito cercabile, diviso in paragrafi.
+- **Modello unico per il testo**: documenti, web e note usano le stesse versioni e gli stessi segmenti dell'audio, con `page` al posto dei tempi. Correzioni, versioni, export e ricerca funzionano allo stesso modo per tutti i tipi.
+- **Ricerca ibrida**:
+  - full-text di Postgres in italiano (colonna generata + GIN) unito agli embeddings BGE-M3 (pgvector, HNSW) con Reciprocal Rank Fusion;
+  - filtri per tipo, storia e periodo;
+  - estratti con le parole evidenziate;
+  - ricerca solo nella versione corrente del testo;
+  - soglia di similarità (0,45) tarata su dati reali, per scartare i risultati "per significato" che non c'entrano.
+- **Embedder**: servizio interno (stessa immagine del worker di trascrizione), senza porte esposte. Gli embeddings si ricalcolano quando un passaggio viene corretto. Se l'embedder non risponde, la ricerca prosegue solo per parole e lo dice.
+- **Domande sull'archivio**:
+  - recupero dei passaggi (OR sulle parole significative + significato), risposta con rimandi [n] cliccabili;
+  - i rimandi a passaggi inesistenti vengono rimossi;
+  - le citazioni «…» non presenti alla lettera nei passaggi vengono segnalate;
+  - senza modello disponibile si mostrano comunque i passaggi pertinenti;
+  - nel registro di audit c'è chi ha chiesto e quale modello ha risposto, mai la domanda.
+- **Interfaccia**:
+  - pagina Ricerca (Cerca / Chiedi all'archivio, ⌘K);
+  - lettore per documenti, web e note;
+  - "Link" nell'archivio e nelle storie;
+  - un risultato apre la fonte sul passaggio: per l'audio il player si posiziona al secondo giusto.
+- **Comando `reindex`** per i dati caricati prima di questa fase.
+- 53 test automatici.
+
+**Sicurezza delle pagine web (SSRF)**
+- Solo http/https sulle porte 80 e 443, niente credenziali nell'indirizzo.
+- Si risolve il nome e si rifiutano gli indirizzi non pubblici (rete interna, localhost, metadati cloud, nomi dei container), a ogni redirect (al massimo 5).
+- Limiti di 15 MB e 20 secondi.
+- Resta un rischio residuo di DNS rebinding tra controllo e connessione: in produzione il worker deve stare su una rete con uscita filtrata (solo Internet pubblico).
+
+**Verificato a mano**
+- Verbale scansionato e leggermente storto: testo letto dall'OCR senza errori, paragrafi ricostruiti.
+- Pagina di Wikipedia acquisita, con copia salvata e metadati.
+- Ricerca per significato sull'intervista Biagi–Agnelli (40 minuti): "cosa pensa della politica italiana" trova passaggi senza parole in comune. Tempi di risposta 0,1–0,2 s.
+- `http://localhost:…` rifiutato.
+
+**Modelli linguistici configurati in sviluppo**
+- Locale: Ollama nel compose con `qwen2.5:3b` su CPU. Serve solo a provare il percorso delle fonti riservate: è lento (circa 70 s per pulire 9 frasi) e scarso nelle risposte. Sul server del pilota si sceglierà un modello più capace su GPU.
+- Cloud: OpenRouter, con Claude Haiku 5.5 (veloce) e Claude Sonnet 5.5 (forte), per sviluppare e confrontare i modelli su dati di prova o pubblici. Per il pilota la scelta (OpenRouter con restrizioni sulla conservazione dei dati oppure contratto diretto con il fornitore) va concordata con la redazione.
+- Prova reale: alla domanda sulla cassa integrazione nell'intervista Biagi–Agnelli, Sonnet ha risposto citando i passaggi, ma ha rifiutato di attribuire le frasi ad Agnelli perché la trascrizione (senza riconoscimento delle voci) le assegna tutte a un solo interlocutore. È la conferma che la diarization è necessaria per le interviste.
+
+**Riconoscimento delle voci attivato**
+- Token Hugging Face fine-grained (sola lettura dei repository con licenza accettata) e pyannote `speaker-diarization-community-1` nel worker `stt`.
+- "Riconosci le voci" su una trascrizione esistente: non ritrascrive, conserva testo e correzioni, divide i passaggi non corretti in cui parlano due persone, sostituisce gli interlocutori con "Voce 1", "Voce 2"…
+- Se la diarization fallisce durante una trascrizione nuova, la trascrizione resta valida con una sola voce e l'errore viene registrato.
+- Intervista Biagi–Agnelli (18 minuti): 2 voci riconosciute, 11 passaggi divisi, attribuzioni corrette nei passaggi controllati. Su CPU (Mac, Docker) ci sono voluti circa 13 minuti; su GPU servirà circa un minuto.
+- Stessa domanda sulla cassa integrazione prima e dopo. Prima Sonnet si rifiutava di attribuire le frasi, perché risultavano tutte di Biagi. Dopo risponde attribuendole ad Agnelli, distingue la domanda di Biagi, segnala il passaggio trascritto male da verificare sul video, e tutte le citazioni risultano verificate.
+
+**Da fare più avanti**
+- Anteprima del PDF dentro l'app (pdf.js) con evidenziazione del paragrafo; oggi si apre nel visualizzatore del browser alla pagina giusta.
+- Copia della pagina web più fedele (PDF o screenshot con un browser headless); oggi è l'HTML scaricato, senza immagini né stili esterni.
+- Riordino dei risultati con un cross-encoder locale, se la qualità della ricerca lo richiede.
+- Le domande sono sincrone (10–30 s con un modello cloud): coda e streaming se servono tempi più lunghi.
+- Taratura della soglia di similarità su più materiale reale.

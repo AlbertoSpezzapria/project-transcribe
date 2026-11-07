@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, FileText, Inbox, NotebookPen, Plus } from "lucide-react";
+import { ArrowLeft, FileText, Globe, Inbox, NotebookPen, Plus } from "lucide-react";
 import { useState } from "react";
 
-import { NoteDialog, SourceList, typeLabel, UploadZone } from "@/components/sources";
+import { NoteDialog, SourceList, typeLabel, UploadZone, WebDialog } from "@/components/sources";
 import { Alert, Badge, Button, Dialog, EmptyState, Field, Input, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
 import { api, unwrap, type Source, type SourceType, type Story } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
@@ -127,6 +127,7 @@ function CreateStoryDialog({ workspaceId, open, onClose }: { workspaceId: string
 export function StoryPage() {
   const { workspaceId, storyId } = useParams({ strict: false }) as { workspaceId: string; storyId: string };
   const [noteOpen, setNoteOpen] = useState(false);
+  const [webOpen, setWebOpen] = useState(false);
   const path = { workspace_id: workspaceId, story_id: storyId };
   const story = useQuery({
     queryKey: ["stories", workspaceId, storyId],
@@ -151,9 +152,14 @@ export function StoryPage() {
         title={s.title}
         subtitle={s.description}
         actions={
-          <Button variant="secondary" onClick={() => setNoteOpen(true)}>
-            <NotebookPen className="size-4" /> Nota
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setWebOpen(true)}>
+              <Globe className="size-4" /> Link
+            </Button>
+            <Button variant="secondary" onClick={() => setNoteOpen(true)}>
+              <NotebookPen className="size-4" /> Nota
+            </Button>
+          </>
         }
       />
       <section className="space-y-6">
@@ -170,6 +176,7 @@ export function StoryPage() {
         </div>
       </section>
       <NoteDialog workspaceId={workspaceId} storyId={storyId} open={noteOpen} onClose={() => setNoteOpen(false)} />
+      <WebDialog workspaceId={workspaceId} storyId={storyId} open={webOpen} onClose={() => setWebOpen(false)} />
     </>
   );
 }
@@ -177,6 +184,8 @@ export function StoryPage() {
 export function ArchivePage() {
   const workspaceId = useWorkspaceId();
   const [type, setType] = useState<SourceType | "">("");
+  const [webOpen, setWebOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
   const sources = useQuery({
     queryKey: ["sources", workspaceId, { type }],
     queryFn: () =>
@@ -193,6 +202,13 @@ export function ArchivePage() {
         title="Archivio fonti"
         subtitle="Tutto il materiale del workspace, anche quello non ancora assegnato a una storia."
         actions={
+          <>
+          <Button variant="secondary" onClick={() => setWebOpen(true)}>
+            <Globe className="size-4" /> Link
+          </Button>
+          <Button variant="secondary" onClick={() => setNoteOpen(true)}>
+            <NotebookPen className="size-4" /> Nota
+          </Button>
           <Select className="w-44" value={type} onChange={(e) => setType(e.target.value as SourceType | "")} aria-label="Filtra per tipo">
             <option value="">Tutti i tipi</option>
             {Object.entries(typeLabel).map(([k, v]) => (
@@ -201,8 +217,11 @@ export function ArchivePage() {
               </option>
             ))}
           </Select>
+          </>
         }
       />
+      <WebDialog workspaceId={workspaceId} open={webOpen} onClose={() => setWebOpen(false)} />
+      <NoteDialog workspaceId={workspaceId} open={noteOpen} onClose={() => setNoteOpen(false)} />
       <div className="space-y-6">
         <UploadZone workspaceId={workspaceId} />
         {sources.isLoading && <Spinner />}

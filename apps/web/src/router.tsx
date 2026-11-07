@@ -5,6 +5,7 @@ import { Shell } from "@/components/Shell";
 import { authQuery, routeForStep } from "@/lib/auth";
 import { LoginPage, MfaSetupPage, MfaVerifyPage } from "@/routes/auth";
 import { ArchivePage, ComingSoon, StoriesPage, StoryPage } from "@/routes/pages";
+import { SearchPage } from "@/routes/search";
 import { SourcePage } from "@/routes/source";
 
 type Ctx = { queryClient: QueryClient };
@@ -72,15 +73,21 @@ const wsIndex = createRoute({
 const stories = createRoute({ getParentRoute: () => workspace, path: "/storie", component: StoriesPage });
 const story = createRoute({ getParentRoute: () => workspace, path: "/storie/$storyId", component: StoryPage });
 const archive = createRoute({ getParentRoute: () => workspace, path: "/archivio", component: ArchivePage });
-const source = createRoute({ getParentRoute: () => workspace, path: "/fonti/$sourceId", component: SourcePage });
+const source = createRoute({
+  getParentRoute: () => workspace,
+  path: "/fonti/$sourceId",
+  component: SourcePage,
+  // ?seg=<id>: passaggio da mostrare (arrivo da un risultato di ricerca)
+  validateSearch: (s: Record<string, unknown>): { seg?: string } => (typeof s.seg === "string" ? { seg: s.seg } : {}),
+});
 const search = createRoute({
   getParentRoute: () => workspace,
   path: "/ricerca",
-  component: () => (
-    <ComingSoon title="Ricerca" phase="Fase 3">
-      Ricerca su tutte le fonti, per parole esatte e per concetto, con salto al punto preciso dell'audio o del documento.
-    </ComingSoon>
-  ),
+  component: SearchPage,
+  validateSearch: (s: Record<string, unknown>): { q?: string; mode?: "cerca" | "chiedi" } => ({
+    ...(typeof s.q === "string" && s.q ? { q: s.q } : {}),
+    ...(s.mode === "chiedi" || s.mode === "cerca" ? { mode: s.mode } : {}),
+  }),
 });
 const people = createRoute({
   getParentRoute: () => workspace,

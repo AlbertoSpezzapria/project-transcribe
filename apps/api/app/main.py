@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app import jobs, storage
 from app.config import get_settings
-from app.routers import auth, sources, stories, transcripts, workspaces
+from app.routers import auth, search, sources, stories, transcripts, workspaces
 
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -49,5 +49,12 @@ def health():
     return {"status": "ok"}
 
 
-for r in (auth.router, workspaces.router, stories.router, sources.router, transcripts.router):
+for r in (
+    auth.router,
+    workspaces.router,
+    stories.router,
+    sources.router,
+    transcripts.router,
+    search.router,
+):
     app.include_router(r, prefix="/api")

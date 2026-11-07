@@ -121,5 +121,48 @@ def seed_dev() -> None:
         typer.echo(f"Creati workspace '{ws.name}' e utente {email}.")
 
 
+@cli.command()
+def reindex() -> None:
+    """Prepara per la ricerca i dati già presenti: estrae il testo di documenti e note
+    che non ce l'hanno e mette in coda gli embeddings mancanti."""
+    from app import jobs
+
+    with _db() as admin:
+        workspaces = admin.scalars(select(Workspace.id)).all()
+    with jobs.app.open():
+        _reindex(workspaces)
+
+
+def _reindex(workspaces: list[uuid.UUID]) -> None:
+    from app import jobs
+    from app.db import SessionLocal, bind_workspace
+    from app.models import Source, SourceStatus, SourceType, Transcript
+    from app.pipeline.documents import text_to_paragraphs
+
+    for ws in workspaces:
+        with SessionLocal() as db:
+            bind_workspace(db, ws)
+            for source in db.scalars(select(Source)).all():
+                has_text = db.scalar(
+                    select(Transcript.id).where(Transcript.source_id == source.id, Transcript.is_current)
+                )
+                if has_text:
+                    jobs.queue_index(source)
+                elif source.type == SourceType.note and source.note_text:
+                    jobs.save_text_version(
+                        db, source, engine="note", paragraphs=text_to_paragraphs(source.note_text)
+                    )
+                    db.commit()
+                    jobs.queue_index(source)
+                elif source.type == SourceType.document:
+                    source.status = SourceStatus.processing
+                    source.status_detail = "In coda per l'estrazione del testo"
+                    db.commit()
+                    jobs.extract_document.defer(workspace_id=str(ws), source_id=str(source.id))
+                elif source.type == SourceType.web and source.url:
+                    jobs.fetch_web.defer(workspace_id=str(ws), source_id=str(source.id))
+                typer.echo(f"{source.type.value:9} {source.title[:60]}")
+
+
 if __name__ == "__main__":
     cli()

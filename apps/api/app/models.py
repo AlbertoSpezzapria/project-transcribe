@@ -8,9 +8,11 @@ import enum
 import uuid
 from datetime import date, datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Computed,
     Date,
     DateTime,
     Enum,
@@ -25,8 +27,11 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, deferred, mapped_column, relationship
+
+# Dimensione degli embeddings (BGE-M3)
+EMBEDDING_DIM = 1024
 
 
 class Base(DeclarativeBase):
@@ -212,6 +217,8 @@ class Source(Base):
     status_detail: Mapped[str | None] = mapped_column(String(500))
     meta: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, nullable=False)
     note_text: Mapped[str | None] = mapped_column(Text)
+    # Fonti web: indirizzo richiesto (quello finale, dopo i redirect, è nei metadati)
+    url: Mapped[str | None] = mapped_column(String(2000))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
@@ -276,10 +283,11 @@ class Asset(Base):
 
 
 class Transcript(Base):
-    """Una versione della trascrizione di una fonte audio/video.
+    """Una versione del testo di una fonte: trascrizione di audio/video, testo
+    estratto da un documento o da una pagina web, testo di una nota.
 
-    Ritrascrivere crea una nuova versione: le correzioni fatte sulla precedente
-    non vengono mai sovrascritte. `is_current` indica quella mostrata.
+    Rielaborare crea una nuova versione: le correzioni fatte sulla precedente
+    non vengono mai sovrascritte. `is_current` indica quella mostrata e cercabile.
     """
 
     __tablename__ = "transcripts"
@@ -316,6 +324,11 @@ class Transcript(Base):
     )
     clean_model: Mapped[str | None] = mapped_column(String(100))
     clean_error: Mapped[str | None] = mapped_column(String(500))
+    # Riconoscimento delle voci rifatto su una trascrizione esistente
+    diarize_status: Mapped[JobStatus] = mapped_column(
+        _enum(JobStatus, "job_status"), default=JobStatus.none, server_default="none", nullable=False
+    )
+    diarize_error: Mapped[str | None] = mapped_column(String(500))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _created_at()
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -344,7 +357,8 @@ class Speaker(Base):
 
 
 class Segment(Base):
-    """Unità citabile: un turno di parola con i tempi di ogni parola.
+    """Unità citabile: un turno di parola con i tempi di ogni parola (audio/video)
+    o un paragrafo con la sua pagina (documenti, web, note).
 
     `text_raw` è il verbatim del modello e non cambia mai; `text_edited` contiene
     le correzioni umane; `text_clean` è la versione leggibile, derivata e mai usata
@@ -366,14 +380,22 @@ class Segment(Base):
             ["speakers.workspace_id", "speakers.id"],
             ondelete="SET NULL (speaker_id)",
         ),
+        Index("ix_segments_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_segments_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     transcript_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     idx: Mapped[int] = mapped_column(Integer, nullable=False)
-    start: Mapped[float] = mapped_column(Float, nullable=False)
-    end: Mapped[float] = mapped_column(Float, nullable=False)
+    start: Mapped[float | None] = mapped_column(Float)  # secondi (solo audio/video)
+    end: Mapped[float | None] = mapped_column(Float)
+    page: Mapped[int | None] = mapped_column(Integer)  # pagina (documenti impaginati)
     speaker_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     text_raw: Mapped[str] = mapped_column(Text, nullable=False)
     text_edited: Mapped[str | None] = mapped_column(Text)
@@ -382,6 +404,16 @@ class Segment(Base):
     words: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     edited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Ricerca. Indice per parole calcolato da Postgres sul testo corretto (o sul verbatim);
+    # embedding calcolato in locale dall'embedder, azzerato quando il testo cambia.
+    tsv: Mapped[str] = deferred(
+        mapped_column(
+            TSVECTOR,
+            Computed("to_tsvector('italian', coalesce(text_edited, text_raw))", persisted=True),
+        )
+    )
+    embedding: Mapped[list[float] | None] = deferred(mapped_column(Vector(EMBEDDING_DIM)))
 
 
 class AuditLog(Base):

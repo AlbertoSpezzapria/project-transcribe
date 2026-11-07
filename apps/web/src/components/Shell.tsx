@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { Archive, FileText, LogOut, Menu, Moon, Network, Search, Sun, Users } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -49,12 +49,24 @@ export function Shell() {
     },
   });
 
+  // ⌘K / Ctrl+K: ricerca da qualsiasi pagina
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && workspaceId) {
+        e.preventDefault();
+        navigate({ to: "/w/$workspaceId/ricerca", params: { workspaceId } });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate, workspaceId]);
+
   const workspace = auth?.workspaces.find((w) => w.id === workspaceId);
   const base = `/w/${workspaceId}`;
   const nav: NavItem[] = [
     { to: `${base}/storie`, label: "Storie", icon: <FileText className="size-4" /> },
     { to: `${base}/archivio`, label: "Archivio fonti", icon: <Archive className="size-4" /> },
-    { to: `${base}/ricerca`, label: "Ricerca", icon: <Search className="size-4" />, phase: "Fase 3" },
+    { to: `${base}/ricerca`, label: "Ricerca", icon: <Search className="size-4" />, phase: "⌘K" },
     { to: `${base}/persone`, label: "Persone ed enti", icon: <Users className="size-4" />, phase: "Fase 4" },
     { to: `${base}/grafo`, label: "Connessioni", icon: <Network className="size-4" />, phase: "Fase 4" },
   ];
