@@ -1,1 +1,32 @@
+# Segreti
 .env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Dati locali: mai versionare materiale audio o documenti di lavoro
+legacy/backend/uploads/
+data/
+*.mp3
+*.m4a
+*.wav
+*.mp4
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
